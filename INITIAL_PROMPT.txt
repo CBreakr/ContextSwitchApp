@@ -1,0 +1,337 @@
+ContextSwitch — Electron App Build Prompt
+Document Conventions
+[Rule] — a binding requirement.
+[Clarification] — a tie-breaker for an ambiguous case; has the same weight as a Rule.
+→ in ordering lists means strict implementation dependency: do not begin the next item until the previous is complete.
+Phase 2 is a separate deliverable. Do not begin it until Phase 1 is complete and stable.
+Standing Decisions
+Apply throughout. Do not revisit.
+
+Concern	Decision
+State persistence	Single JSON file
+Distribution	.dmg
+CSS	Plain .css files with human-readable class names — no CSS-in-JS, no programmatic style generation
+Note templates	Global across all contexts
+Ellipse containment	Physical as well as visual — dragging an ellipse moves every object in its containedIds by the same delta simultaneously
+Phase 1 — Core Application
+Implement sections in order. Later sections depend on earlier ones.
+
+1. Data Model
+Define and validate the complete JSON schema before writing any UI. All application state serializes to and deserializes from a single JSON file.
+
+Root
+{
+  "version": 1,
+  "contexts": [ ...Context ],
+  "noteTemplates": [ ...NoteTemplate ]
+}
+Context
+Represents a top-level workspace. The same type is used recursively for sub-contexts.
+
+id:       string
+name:     string
+canvas:   Canvas
+archived: boolean
+Canvas
+objects:  [ ...CanvasObject ]
+notes:    [ ...Note ]
+viewport: { scale: number, offsetX: number, offsetY: number }
+[Clarification] The canvas coordinate system has its origin at (0, 0) with x increasing rightward and y increasing downward. offsetX, offsetY describe the canvas position that maps to the viewport's top-left corner.
+
+CanvasObject
+A discriminated union on type. Every object carries these shared fields:
+
+id:              string
+type:            string        // discriminant
+label:           string
+x:               number
+y:               number
+width:           number
+height:          number
+image:           string | null // base64; required for "website", optional for all others
+archived:        boolean
+attachedNoteIds: [id]
+Type-specific additional fields:
+
+type	Additional fields
+subcontext	context: Context
+website	url: string
+application	bundlePath: string, appName: string
+file	path: string, defaultApp: string
+line	start: Endpoint, end: Endpoint
+ellipse	center: Endpoint, containedIds: [id]
+Positional field usage by type:
+
+subcontext, website, application, file — x, y, width, height are used normally.
+line — position and bounds are fully derived from the resolved endpoints. Store x, y, width, height as 0; never read them for positioning.
+ellipse — position is derived from center. width and height define ellipse dimensions. Store x, y as 0; never read them for positioning.
+Endpoint
+Used by line.start, line.end, and ellipse.center.
+
+{ type: "canvas",   x: number, y: number }
+  or
+{ type: "anchored", objectId: id }
+An "anchored" endpoint resolves to the center of the referenced object's bounding box at render time and follows it when moved.
+
+Endpoint revert rules (canonical — all other sections refer here):
+
+Anchored target deleted: The endpoint reverts to { type: "canvas", x, y } at the last known absolute position of the anchor point.
+Anchored target archived: The endpoint remains stored as "anchored". Any line or ellipse whose endpoint references an archived object is hidden while that object is archived; it reappears when the object is un-archived.
+Note
+id:      string
+format:  "plaintext" | "html"
+content: string    // plain text or HTML string
+css:     string    // non-empty only when format is "html"
+anchor:  NoteAnchor
+x:       number    // pixel offset from the anchor point
+y:       number    // pixel offset from the anchor point
+width:   number
+height:  number
+NoteAnchor
+{ type: "frame" }
+  or
+{ type: "object", objectId: id, corner: "top-left" | "top-right" | "bottom-left" | "bottom-right" }
+"frame" — anchor point is canvas origin (0, 0) of the note's parent context. x, y are therefore absolute canvas coordinates. Default for newly created notes.
+"object" — anchor point is the specified corner of the referenced object's current bounding box. x, y are pixel offsets from that corner. The note moves with the object.
+Note anchor revert rules (same pattern as Endpoint revert rules):
+
+Anchored object deleted: Note's anchor reverts to { type: "frame" } at the note's last known absolute canvas position.
+Anchored object archived: Note remains stored as anchored but is hidden while the object is archived; it reappears at the same relative offset when the object is un-archived.
+[Rule] Notes are not independently archivable. Their visibility is controlled entirely by their anchor state and their parent context's visibility.
+
+NoteTemplate
+id:      string
+name:    string
+format:  "plaintext" | "html"
+content: string
+css:     string
+2. Application Shell
+Window Layout
+Three fixed regions, top to bottom:
+
+Tab Bar
+Navigation Bar
+Canvas Area (remainder)
+A collapsible palette panel overlays or docks to one side of the canvas area.
+
+Archive / Delete Constraint
+[Rule — canonical location] A context or sub-context cannot be archived or deleted unless every direct child object is already archived or deleted.
+
+[Clarification] The constraint is shallow — it applies only to direct children, not the full subtree. A direct child that is an archived sub-context satisfies the constraint for its parent regardless of what is inside that sub-context.
+On violation, show an explanatory message identifying the blocking children. Do not silently skip or partially execute the action.
+Delete always requires a confirmation dialog.
+Archive always requires a confirmation dialog.
+All other sections that mention this constraint refer here rather than restating it.
+
+Tab Bar
+One tab per top-level context.
++ button at the right end creates a new context (prompts for name).
+Per tab:
+Double-click label to rename inline.
+Drag to reorder. Tab order is persisted as the order of the contexts array in the JSON file.
+Right-click → Archive or Delete (see Archive/Delete Constraint above).
+Navigation Bar
+Back button — disabled when viewing a top-level context.
+Breadcrumb trail — context names separated by ›.
+At top level: shows only the current context name (not clickable).
+Inside a sub-context: full path from the top-level context to the current location; each ancestor is a clickable link that navigates directly to that level.
+Navigation Behavior
+Clicking a sub-context object on the canvas navigates into it.
+Back navigates to the immediate parent.
+The active tab always reflects the top-level context regardless of nesting depth.
+3. Canvas
+Each context and sub-context has its own independent canvas.
+
+Viewport
+Pan by dragging empty canvas space.
+Zoom by scroll wheel or pinch gesture.
+scale, offsetX, offsetY are persisted in canvas.viewport.
+Objects on Canvas
+All objects are draggable to any position.
+All objects are resizable by dragging edges or corners.
+[Clarification] There is no enforced minimum object size, but a resize drag must not produce a zero or negative dimension — clamp to 1 px minimum.
+Fit to Screen
+A "Fit to screen" button adjusts canvas.viewport (scale and offsets) so all objects on the current canvas are visible within the window, with a small margin. Object positions are unchanged.
+
+[Clarification] If the canvas has no objects, this is a no-op.
+
+Object Context Menu
+Right-clicking any object opens a menu with:
+
+Edit properties
+Add / view attached notes
+Archive (confirmation required; see Archive/Delete Constraint)
+Delete (confirmation required; see Archive/Delete Constraint)
+Type-specific actions (specified per type in Section 4)
+4. Object Types
+Implement in this order: Website → Application → File/Folder → Sub-Context → Line → Ellipse.
+
+Rationale: simple types first; Line and Ellipse introduce the endpoint/anchor system; Sub-Context introduces nested navigation.
+
+Each type is described using the same template: Data · Visual · Behavior · Creation.
+
+Website
+Data: url: string, label, image (required — base64 screenshot of the page)
+
+Visual: Image fills the object frame; label below or overlaid.
+
+Behavior:
+
+Single click: open url in the default browser.
+Right-click: standard context menu; no type-specific actions.
+Creation: Dialog with fields for URL and label. Screenshot is captured automatically or pasted by the user and stored as image.
+
+Application
+Data: bundlePath: string, appName: string, label, image (optional — falls back to system app icon)
+
+Visual: image if set; otherwise the system-resolved application icon. Label below.
+
+Behavior:
+
+Single click: launch the application at bundlePath.
+Right-click: standard context menu; no type-specific actions.
+Creation: Searchable list of installed macOS applications. Selecting one auto-populates bundlePath, appName, and label.
+
+File / Folder
+Data: path: string, defaultApp: string, label, image (optional)
+
+Visual: Icon of defaultApp (or image if set); filename as label; rendered inside a "folder frame" border style.
+
+Behavior:
+
+Single click: open path using defaultApp.
+Right-click: standard context menu; no type-specific actions.
+Creation: File picker for path; then prompt to confirm or change the default application.
+
+Sub-Context
+Data: A full nested Context object (its own canvas, objects, notes).
+
+Visual:
+
+If image is set: display the image with label overlaid.
+If image is not set: display a labeled rectangular frame.
+Internal canvas contents are never rendered in the parent view.
+Behavior:
+
+Single click: navigate into this sub-context.
+Right-click: standard context menu. Archive and Delete enforce the Archive/Delete Constraint.
+Creation: Prompt for a name; creates a new empty Context.
+
+Line
+Data: start: Endpoint, end: Endpoint
+
+Visual: A straight line between the two resolved endpoint positions. Hidden if either endpoint's anchored target is archived (see Endpoint revert rules).
+
+Behavior:
+
+Single click or right-click → Edit: enter edit mode.
+Edit mode:
+Drag either endpoint to a new canvas position.
+Drag an endpoint onto an object to anchor it to that object (snaps to object center).
+Drag an anchored endpoint off its object to detach it at the drag-release position as canvas coordinates.
+Click elsewhere or press Escape to exit edit mode.
+[Clarification] A line with both endpoints anchored to the same object is valid — it renders as a zero-length point and follows that object.
+Creation: Dragging from the palette opens a minimal creation dialog (or places default endpoints at the drop position) and immediately enters edit mode.
+
+Ellipse
+Data: center: Endpoint, width: number, height: number, containedIds: [id]
+
+Visual: An ellipse outline at the resolved center position with the stored dimensions. Hidden if center's anchored target is archived (see Endpoint revert rules).
+
+Behavior:
+
+Single click or right-click → Edit: enter edit mode.
+Moving: When the ellipse is dragged, every object in containedIds moves by the same delta simultaneously. This applies at all times, not only in edit mode.
+Edit mode:
+Drag the center to reposition it (same anchor/detach behavior as Line endpoints).
+Drag N/S/E/W edge handles to reshape — updates width and height.
+Any object whose entire bounding box falls within the ellipse outline is highlighted.
+On exit, containedIds is replaced with the current highlighted set.
+[Clarification — containedIds and archiving] Archived objects in containedIds retain membership. Their stored positions are updated when the ellipse moves so they reappear in the correct relative position when un-archived. Archived objects are not visible on the canvas, are never highlighted during edit mode, and are not removed from containedIds on edit-mode exit.
+
+[Clarification — nested ellipses] An ellipse cannot be a member of its own containedIds. If a contained object is itself an ellipse, moving it also moves its containedIds members transitively. This chaining is resolved at the move-delta application step, not stored as nested structure.
+
+Creation: Dragging from the palette places the ellipse at the drop position with default dimensions and immediately enters edit mode.
+
+5. Notes
+Notes are always-visible overlays on the canvas — never tooltips. A note's position is an offset from its NoteAnchor (see Section 1 for anchor and revert rules).
+
+Plain Text Notes
+Editable inline by clicking.
+No formatting controls.
+HTML + CSS Notes
+Stores an HTML string and a CSS string.
+Rendered in place on the canvas as a styled block. Use a sandboxed iframe or shadow DOM to scope styles and prevent leakage.
+HTML and CSS are editable via a modal editor opened from the note.
+Templates (NoteTemplate)
+Either format can be saved with a name via "Save as template" on a note.
+Templates appear in the palette's Notes sub-section.
+Dragging a template onto the canvas creates a new, independent note instance — edits to the instance do not affect the template and vice versa.
+Templates are global across all contexts and sub-contexts.
+6. Palette
+A collapsible panel, always accessible from the canvas. Scrollable to accommodate many note templates.
+
+Object entries (always present, one per type):
+Sub-Context · Website · Application · File/Folder · Line · Ellipse
+
+Notes sub-section (always present):
+
+Plain text note
+HTML + CSS note
+One entry per saved NoteTemplate
+Creation flow: Drag an entry from the palette and drop it onto the canvas. On drop, open the creation dialog for that type. If the user cancels, no object or note is created and no state is modified.
+
+7. Archive System
+Archiving
+Any canvas object: right-click → Archive (confirmation required; see Archive/Delete Constraint).
+Any top-level context: right-click on its tab → Archive (confirmation required; see Archive/Delete Constraint).
+Archived items are hidden from all canvas views.
+Archive View
+Accessible via a dedicated toolbar button. Shows all archived items within their original context/sub-context hierarchy.
+
+Parent contexts and sub-contexts appear as structural containers even if not themselves archived.
+Each archived item has an Un-archive action.
+Each sub-context node has a bulk action: Un-archive all immediate children — un-archives all direct child objects of that sub-context. If the sub-context itself is archived, it is also un-archived.
+[Clarification] Un-archiving a context or sub-context individually does not automatically un-archive its children — only the bulk action does that, and it applies one level deep only.
+
+Phase 2 — Chrome Extension
+Build only after Phase 1 is complete and stable. Distributed independently from the .dmg.
+
+Electron Side — Local HTTP Server
+The Electron app runs a local HTTP server for its entire lifetime.
+
+Default port: 27182, configurable in app settings.
+The port setting is exposed in a dedicated section of the app's settings UI.
+[Clarification] If the configured port is unavailable at startup, surface a clear error in the settings UI indicating the conflict. The app continues to run normally without the HTTP server; the extension will show its own error state.
+GET /destinations
+Returns all contexts and sub-contexts as:
+
+[{ "id": "...", "displayPath": "Work › Project A" }]
+Sets CORS headers permitting requests from the extension origin.
+
+POST /add
+Accepts:
+
+{
+  "url": "...",
+  "label": "...",
+  "destinationId": "...",
+  "screenshot": "<base64>"
+}
+Creates a new website object in the specified context/sub-context with image set to the provided screenshot. The new object is placed at the center of the destination context's stored viewport. If the user is currently viewing the destination canvas, the view updates immediately.
+
+Extension
+Permissions: activeTab, scripting
+
+Flow:
+
+User clicks the extension icon on any page.
+Extension captures a screenshot of the current tab and reads the URL and page title.
+Extension fetches GET http://localhost:{port}/destinations. If the request fails, skip to step 6.
+Popup displays:
+Text input for label (pre-filled with page title, editable).
+Searchable, scrollable list of all returned contexts and sub-contexts.
+On confirm, extension POSTs to http://localhost:{port}/add.
+On success: Show a brief confirmation message; close the popup after a short delay.
+On failure (app not running, port mismatch, network error): Show a clear error message with a hint to verify the app is running and that port settings match.
+Extension settings page: User can change the port number. Default is 27182. The settings page should make the required match explicit (e.g., "This must match the port set in the ContextSwitch app").

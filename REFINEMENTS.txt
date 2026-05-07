@@ -1,0 +1,271 @@
+POST-INITIAL-BUILD REFINEMENTS FOR CONTEXTSWITCH
+=================================================
+The following changes were made to the ContextSwitch Electron app after the
+initial build was completed. Apply them in order to a freshly-built copy of
+the app.
+
+
+─────────────────────────────────────────────────────────────────────────────
+1. TAB BAR WINDOW DRAGGING
+─────────────────────────────────────────────────────────────────────────────
+Problem: Only the narrow traffic-light spacer area was draggable. The rest of
+the tab bar could not be used to drag the window.
+
+Fix: In renderer/styles/tabs.css, change .tab-bar-tabs from -webkit-app-region:
+no-drag to drag, then add -webkit-app-region: no-drag to .tab so that the
+individual tab divs (which sit inside .tab-bar-tabs) remain clickable.
+
+  .tab-bar-tabs {
+    -webkit-app-region: drag;   /* was: no-drag */
+    ...
+  }
+  .tab {
+    -webkit-app-region: no-drag;
+    ...
+  }
+
+
+─────────────────────────────────────────────────────────────────────────────
+2. CHROME EXTENSION
+─────────────────────────────────────────────────────────────────────────────
+A Chrome extension was built in the extension/ directory that lets the user
+add the current web page (with a screenshot) to a ContextSwitch context.
+
+Key files:
+  extension/manifest.json   – Manifest V3, permissions: activeTab, scripting,
+                              storage, tabs. host_permissions must include
+                              "http://127.0.0.1/*" and "http://localhost/*".
+  extension/background.js   – Service worker; handles the capture-screenshot
+                              message by calling chrome.tabs.captureVisibleTab.
+  extension/popup.html/.js  – UI that fetches /destinations from the local
+                              HTTP server (port configurable via chrome.storage),
+                              lets the user pick a context, then POSTs to /add.
+  extension/options.html/.js – Simple page for setting the server port.
+
+The HTTP server runs inside main.js on port 27182 (configurable). It exposes:
+  GET  /destinations  – returns the list of contexts/sub-contexts the user can
+                        save to, with a displayPath like "Work › Project A".
+  POST /add           – accepts { url, title, screenshotDataUrl, destinationId }
+                        and inserts a new website object into the target context
+                        at the current viewport centre.
+
+Two headers are required on every response or the browser will block the
+request:
+  Access-Control-Allow-Origin: *
+  Access-Control-Allow-Private-Network: true   (only when the request includes
+    the Access-Control-Request-Private-Network header — Chrome 104+ PNA spec)
+
+Use AbortController + setTimeout for fetch timeouts in the extension popup
+(do NOT use AbortSignal.timeout — it is not available in older Chrome builds):
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 5000);
+  const res = await fetch(url, { signal: controller.signal });
+  clearTimeout(timer);
+
+After the main process writes a new website object to state.json it sends the
+IPC event 'state-updated-externally' to the renderer. The renderer wires:
+  window.api.onExternalUpdate(() => store.reload());
+and store.reload() re-reads state.json from disk and calls _notify().
+
+
+─────────────────────────────────────────────────────────────────────────────
+3. DRAG-THEN-CLICK BUG ON CANVAS OBJECTS
+─────────────────────────────────────────────────────────────────────────────
+Problem: After dragging a canvas object (e.g. a website tile), releasing the
+mouse would immediately trigger the object's click handler and open the URL.
+
+Root cause: e.movementX/Y on the subsequent click event is near-zero even
+after a long drag, so it cannot be used to distinguish a drag from a click.
+
+Fix: In renderer/components/canvas-view.js, add a module-level boolean flag:
+
+  let dragMoved = false;
+
+Inside startObjectDrag's onMove callback, set it when the cumulative delta
+exceeds 2 px:
+
+  if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragMoved = true;
+
+In each object's click handler, check and clear the flag:
+
+  el.addEventListener('click', () => {
+    if (dragMoved) { dragMoved = false; return; }
+    handleObjectClick(obj, ctx);
+  });
+
+
+─────────────────────────────────────────────────────────────────────────────
+4. ADD BUTTON (+) DID NOTHING
+─────────────────────────────────────────────────────────────────────────────
+Problem: The + button in the tab bar called window.prompt(), which returns
+null in Electron's renderer process (native dialogs are disabled).
+
+Fix: Add a custom showPrompt() function to renderer/components/dialogs.js
+that renders an in-app modal with a text input, Cancel and Create buttons,
+Enter to confirm, and Escape to cancel. It returns a Promise<string|null>.
+
+Update renderer/components/tab-bar.js to import and use showPrompt:
+
+  import { showPrompt } from './dialogs.js';
+  ...
+  addBtn.addEventListener('click', async () => {
+    const name = await showPrompt('New context', 'Context name');
+    if (name) store.addContext(name);
+  });
+
+
+─────────────────────────────────────────────────────────────────────────────
+5. ARCHIVE BUTTON SHOWED BLANK BLURRED OVERLAY WITH NO EXIT
+─────────────────────────────────────────────────────────────────────────────
+Problem: Clicking the archive (🗄) button removed the 'hidden' class from the
+overlay but renderArchiveOverlay() was never called, so the panel was empty.
+The backdrop blur made the app unusable and there was no close button visible.
+
+Fix: In renderer/components/archive-view.js, update showArchiveOverlay() to
+call store._notify() after revealing the overlay. This triggers the app's
+render loop, which calls renderArchiveOverlay() and fills in the content
+(including the close button):
+
+  export function showArchiveOverlay() {
+    const el = document.getElementById('archive-overlay');
+    el.classList.remove('hidden');
+    store._notify();
+  }
+
+
+─────────────────────────────────────────────────────────────────────────────
+6. HOVER TOOLTIPS FOR ALL BUTTONS
+─────────────────────────────────────────────────────────────────────────────
+Problem: No hover tooltips existed on any of the icon buttons, making the UI
+hard to discover.
+
+Approach: CSS ::after pseudo-element tooltips do not work here because every
+button sits inside a container with overflow: hidden (tab bar, nav bar, canvas
+viewport), which clips the pseudo-element. Instead, use a single floating
+<div> appended directly to <body> and positioned with fixed coordinates via
+JavaScript.
+
+Step 1 – Add to renderer/styles/app.css:
+
+  #app-tooltip {
+    position: fixed;
+    background: #111;
+    color: #e0e0e0;
+    font-size: 11px;
+    white-space: nowrap;
+    padding: 4px 8px;
+    border-radius: 4px;
+    pointer-events: none;
+    z-index: 99999;
+    opacity: 0;
+    transition: opacity 0.12s;
+  }
+
+Step 2 – Create renderer/tooltip.js:
+
+  const el = document.createElement('div');
+  el.id = 'app-tooltip';
+  document.body.appendChild(el);
+
+  let showTimer = null;
+
+  function show(text, targetRect) {
+    el.textContent = text;
+    el.style.opacity = '0';
+    el.style.display = 'block';
+    const tw = el.offsetWidth;
+    let left = targetRect.left + targetRect.width / 2 - tw / 2;
+    let top  = targetRect.bottom + 6;
+    if (top + el.offsetHeight > window.innerHeight - 8)
+      top = targetRect.top - el.offsetHeight - 6;
+    left = Math.max(6, Math.min(left, window.innerWidth - tw - 6));
+    el.style.left = left + 'px';
+    el.style.top  = top  + 'px';
+    el.style.opacity = '1';
+  }
+
+  function hide() {
+    clearTimeout(showTimer);
+    el.style.opacity = '0';
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target) return;
+    clearTimeout(showTimer);
+    showTimer = setTimeout(() => {
+      show(target.dataset.tooltip, target.getBoundingClientRect());
+    }, 400);
+  });
+
+  document.addEventListener('mouseout', (e) => {
+    const target = e.target.closest('[data-tooltip]');
+    if (!target) return;
+    if (!target.contains(e.relatedTarget)) hide();
+  });
+
+  document.addEventListener('mousedown', hide);
+  document.addEventListener('scroll', hide, true);
+
+Step 3 – Import tooltip.js in renderer/app.js (side-effect import):
+
+  import './tooltip.js';
+
+Step 4 – Add data-tooltip="<label>" attributes to every button:
+
+  tab-bar.js      archive button:  data-tooltip="View archived items"
+  tab-bar.js      add button:      data-tooltip="New context"
+  app.js          settings button: data-tooltip="Settings"
+  nav-bar.js      back button:     data-tooltip="Back"
+  canvas-view.js  fit button:      data-tooltip="Fit to screen"
+  canvas-view.js  note delete btn: data-tooltip="Delete note"
+  canvas-view.js  note edit btn:   data-tooltip="Edit HTML/CSS"
+  canvas-view.js  note tmpl btn:   data-tooltip="Save as template"
+  settings.js     close button:    data-tooltip="Close"
+  archive-view.js close button:    data-tooltip="Close"
+  archive-view.js unarchive ctx:   data-tooltip="Restore this context to the tab bar"
+  archive-view.js bulk unarchive:  data-tooltip="Restore all archived items in this context"
+  archive-view.js item unarchive:  data-tooltip="Restore this item to the canvas"
+
+
+─────────────────────────────────────────────────────────────────────────────
+7. BUILDING AND DISTRIBUTING
+─────────────────────────────────────────────────────────────────────────────
+electron-builder is used to produce a .app bundle (and optionally a .dmg).
+Add to package.json:
+
+  "author": "Your Name",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.yourname.contextswitch",
+    "productName": "ContextSwitch",
+    "mac": { "category": "public.app-category.productivity" },
+    "dmg": { "title": "ContextSwitch" }
+  }
+
+Build with:
+  CSC_IDENTITY_AUTO_DISCOVERY=false npm run build
+
+The .app bundle lands in dist/mac-arm64/ContextSwitch.app regardless of
+whether the DMG step succeeds. Copy it to /Applications:
+
+  cp -r dist/mac-arm64/ContextSwitch.app /Applications/
+  mdimport /Applications/ContextSwitch.app   # re-index for Spotlight
+
+
+─────────────────────────────────────────────────────────────────────────────
+8. .GITIGNORE
+─────────────────────────────────────────────────────────────────────────────
+Add a .gitignore at the project root ignoring:
+  node_modules/
+  dist/
+  .DS_Store
+  **/.DS_Store
+  npm-debug.log*
+  .vscode/
+  .idea/
+  *.swp  *.swo
