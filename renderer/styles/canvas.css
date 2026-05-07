@@ -1,0 +1,115 @@
+.canvas-viewport {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  background-image:
+    radial-gradient(circle, #3a3a3a 1px, transparent 1px);
+  background-size: 24px 24px;
+  cursor: default;
+}
+
+.canvas-panning {
+  cursor: grabbing !important;
+}
+
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* size grows with content; objects are positioned absolutely inside */
+}
+
+.canvas-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  overflow: visible;
+}
+
+/* Lines */
+.canvas-line {
+  stroke: #7db8f7;
+  stroke-width: 2;
+  fill: none;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.canvas-line-editing {
+  stroke: var(--color-accent);
+  stroke-dasharray: 6 3;
+}
+
+/* Ellipses */
+.canvas-ellipse {
+  fill: none;
+  stroke: #7db8f7;
+  stroke-width: 2;
+  pointer-events: stroke;
+  cursor: pointer;
+}
+
+.canvas-ellipse-editing {
+  stroke: var(--color-accent);
+  stroke-dasharray: 6 3;
+}
+
+/* Endpoint handles */
+.canvas-endpoint-handle {
+  fill: var(--color-accent);
+  stroke: white;
+  stroke-width: 1.5;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+.canvas-edge-handle {
+  fill: white;
+  stroke: var(--color-accent);
+  stroke-width: 2;
+  cursor: crosshair;
+  pointer-events: all;
+}
+
+/* Toolbar */
+.canvas-toolbar {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  display: flex;
+  gap: 6px;
+  z-index: 10;
+}
+
+.canvas-toolbar-btn {
+  width: 36px;
+  height: 36px;
+  border-radius: var(--radius-md);
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.1s;
+}
+
+.canvas-toolbar-btn:hover {
+  background: var(--color-surface-2);
+}
+
+.canvas-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  color: var(--color-text-muted);
+  font-size: 16px;
+}

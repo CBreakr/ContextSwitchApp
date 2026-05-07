@@ -1,0 +1,113 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --color-bg:          #1e1e1e;
+  --color-surface:     #2a2a2a;
+  --color-surface-2:   #333333;
+  --color-border:      #444444;
+  --color-text:        #e0e0e0;
+  --color-text-muted:  #888888;
+  --color-accent:      #5b9cf6;
+  --color-accent-hover:#4a8ce0;
+  --color-danger:      #e05252;
+  --color-success:     #52c471;
+  --color-highlight:   rgba(91, 156, 246, 0.2);
+
+  --radius-sm:  4px;
+  --radius-md:  8px;
+  --radius-lg:  12px;
+
+  --tab-bar-height:  40px;
+  --nav-bar-height:  36px;
+  --palette-width:   200px;
+}
+
+html, body {
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  font-size: 13px;
+  line-height: 1.4;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+#app {
+  display: flex;
+  flex-direction: column;
+  width: 100%;
+  height: 100%;
+}
+
+#tab-bar {
+  flex-shrink: 0;
+  height: var(--tab-bar-height);
+  -webkit-app-region: drag;
+}
+
+#nav-bar {
+  flex-shrink: 0;
+  height: var(--nav-bar-height);
+  background: var(--color-surface);
+  border-bottom: 1px solid var(--color-border);
+}
+
+#main-area {
+  flex: 1;
+  display: flex;
+  overflow: hidden;
+  position: relative;
+}
+
+#canvas-container {
+  flex: 1;
+  overflow: hidden;
+  position: relative;
+}
+
+#palette-panel {
+  flex-shrink: 0;
+  position: relative;
+  display: flex;
+}
+
+.hidden {
+  display: none !important;
+}
+
+button {
+  cursor: pointer;
+  border: none;
+  background: none;
+  color: inherit;
+  font: inherit;
+  -webkit-app-region: no-drag;
+}
+
+input, textarea {
+  font: inherit;
+  color: inherit;
+  -webkit-app-region: no-drag;
+}
+
+/* ── Custom tooltips (positioned by tooltip.js) ── */
+#app-tooltip {
+  position: fixed;
+  background: #111;
+  color: #e0e0e0;
+  font-size: 11px;
+  white-space: nowrap;
+  padding: 4px 8px;
+  border-radius: 4px;
+  pointer-events: none;
+  z-index: 99999;
+  opacity: 0;
+  transition: opacity 0.12s;
+}

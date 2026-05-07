@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ContextSwitch</title>
+  <link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="header">
+      <img class="header-logo" src="icons/icon48.png" alt="" />
+      <span class="header-title">ContextSwitch</span>
+      <a class="header-settings" href="#" id="open-settings" title="Extension settings">⚙</a>
+    </header>
+
+    <!-- Loading state -->
+    <div id="view-loading" class="view">
+      <div class="spinner"></div>
+      <p class="status-text">Connecting to ContextSwitch…</p>
+    </div>
+
+    <!-- Error state -->
+    <div id="view-error" class="view hidden">
+      <div class="error-icon">⚠</div>
+      <p class="error-message" id="error-message"></p>
+      <p class="error-hint">
+        Make sure ContextSwitch is running and that the port in
+        <a href="#" id="error-open-settings">extension settings</a>
+        matches the port in the app's Settings panel.
+      </p>
+    </div>
+
+    <!-- Main form -->
+    <div id="view-form" class="view hidden">
+      <div class="screenshot-wrap">
+        <img id="screenshot-img" class="screenshot-img" alt="Page screenshot" />
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="label-input">Label</label>
+        <input type="text" id="label-input" class="field-input" placeholder="Page title" />
+      </div>
+
+      <div class="field">
+        <label class="field-label" for="search-input">Destination</label>
+        <input type="text" id="search-input" class="field-input" placeholder="Search contexts…" />
+      </div>
+
+      <div id="context-list" class="context-list"></div>
+
+      <button id="add-btn" class="add-btn" disabled>Add to ContextSwitch</button>
+    </div>
+
+    <!-- Success state -->
+    <div id="view-success" class="view hidden">
+      <div class="success-icon">✓</div>
+      <p class="status-text">Added successfully!</p>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

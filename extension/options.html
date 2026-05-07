@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>ContextSwitch — Extension Settings</title>
+  <link rel="stylesheet" href="options.css" />
+</head>
+<body>
+  <div class="page">
+    <header class="page-header">
+      <img class="page-logo" src="icons/icon48.png" alt="" />
+      <div>
+        <h1 class="page-title">ContextSwitch</h1>
+        <p class="page-subtitle">Extension Settings</p>
+      </div>
+    </header>
+
+    <section class="section">
+      <h2 class="section-title">Local Server Port</h2>
+      <p class="section-desc">
+        ContextSwitch runs a local HTTP server so this extension can send pages to it.
+        <strong>This port must match the port configured in the ContextSwitch app</strong>
+        (open the app → click the ⚙ gear icon in the top-left).
+        The default port is <code>27182</code>.
+      </p>
+
+      <div class="field">
+        <label class="field-label" for="port-input">Port number</label>
+        <div class="field-row">
+          <input type="number" id="port-input" class="field-input"
+                 min="1024" max="65535" value="27182" />
+          <button id="save-btn" class="save-btn">Save</button>
+        </div>
+        <p id="port-hint" class="field-hint"></p>
+      </div>
+    </section>
+
+    <section class="section section-info">
+      <h2 class="section-title">How to use</h2>
+      <ol class="how-to">
+        <li>Open the <strong>ContextSwitch</strong> desktop app.</li>
+        <li>Navigate to any web page you want to save.</li>
+        <li>Click the <strong>ContextSwitch</strong> extension icon in your toolbar.</li>
+        <li>Edit the label, choose a context, and click <strong>Add to ContextSwitch</strong>.</li>
+      </ol>
+    </section>
+  </div>
+
+  <script src="options.js"></script>
+</body>
+</html>

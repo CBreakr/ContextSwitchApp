@@ -1,0 +1,121 @@
+#palette-panel {
+  position: relative;
+  display: flex;
+  align-items: flex-start;
+}
+
+.palette-toggle-btn {
+  position: absolute;
+  left: -16px;
+  top: 50%;
+  transform: translateY(-50%);
+  z-index: 20;
+  width: 16px;
+  height: 48px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-right: none;
+  border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+  color: var(--color-text-muted);
+  font-size: 14px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s;
+}
+
+.palette-toggle-btn:hover {
+  color: var(--color-text);
+}
+
+.palette-panel {
+  width: var(--palette-width);
+  height: 100%;
+  background: var(--color-surface);
+  border-left: 1px solid var(--color-border);
+  overflow-y: auto;
+  overflow-x: hidden;
+  display: flex;
+  flex-direction: column;
+  padding-bottom: 16px;
+  flex-shrink: 0;
+}
+
+.palette-closed {
+  width: 0;
+  overflow: hidden;
+}
+
+.palette-header {
+  padding: 10px 12px 4px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+}
+
+.palette-section-label {
+  padding: 6px 12px 2px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  border-top: 1px solid var(--color-border);
+  margin-top: 4px;
+}
+
+.palette-entry {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  cursor: grab;
+  border-radius: 0;
+  transition: background 0.1s;
+  position: relative;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.palette-entry:hover {
+  background: var(--color-surface-2);
+}
+
+.palette-entry:active {
+  cursor: grabbing;
+}
+
+.palette-entry-icon {
+  font-size: 16px;
+  flex-shrink: 0;
+  width: 20px;
+  text-align: center;
+}
+
+.palette-entry-label {
+  font-size: 12px;
+  color: var(--color-text);
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.palette-template-delete {
+  opacity: 0;
+  width: 18px;
+  height: 18px;
+  font-size: 10px;
+  color: var(--color-danger);
+  border-radius: 3px;
+  transition: opacity 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+
+.palette-entry:hover .palette-template-delete {
+  opacity: 1;
+}
+
+.palette-template-delete:hover {
+  background: rgba(224, 82, 82, 0.15);
+}

@@ -1,0 +1,86 @@
+.canvas-note {
+  position: absolute;
+  background: #2d2a1e;
+  border: 1px solid #6b5c2a;
+  border-radius: var(--radius-md);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  z-index: 5;
+  cursor: move;
+  min-width: 80px;
+  min-height: 40px;
+}
+
+.canvas-note:hover {
+  border-color: #a0852e;
+}
+
+.canvas-note-html {
+  background: var(--color-surface);
+  border-color: var(--color-border);
+}
+
+.canvas-note-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 2px;
+  padding: 2px 4px;
+  background: rgba(0,0,0,0.2);
+  flex-shrink: 0;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.canvas-note:hover .canvas-note-toolbar {
+  opacity: 1;
+}
+
+.canvas-note-toolbar-btn {
+  width: 20px;
+  height: 20px;
+  border-radius: 3px;
+  font-size: 11px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.1s, background 0.1s;
+}
+
+.canvas-note-toolbar-btn:hover {
+  color: var(--color-text);
+  background: rgba(255,255,255,0.1);
+}
+
+.canvas-note-text {
+  flex: 1;
+  padding: 6px 8px;
+  color: #e8d98a;
+  font-size: 12px;
+  line-height: 1.5;
+  word-wrap: break-word;
+  outline: none;
+  overflow: auto;
+  cursor: text;
+  white-space: pre-wrap;
+}
+
+.canvas-note-iframe {
+  flex: 1;
+  border: none;
+  width: 100%;
+  pointer-events: auto;
+}
+
+.canvas-note-resize {
+  position: absolute;
+  bottom: 0;
+  right: 0;
+  width: 12px;
+  height: 12px;
+  cursor: se-resize;
+  background: linear-gradient(135deg, transparent 50%, var(--color-border) 50%);
+  border-radius: 0 0 var(--radius-md) 0;
+}

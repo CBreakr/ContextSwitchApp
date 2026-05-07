@@ -1,0 +1,174 @@
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 110;
+  backdrop-filter: blur(2px);
+}
+
+.settings-panel {
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-lg);
+  width: 460px;
+  max-width: 90vw;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5);
+  overflow: hidden;
+}
+
+.settings-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.settings-title {
+  font-size: 15px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.settings-close-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  transition: color 0.1s, background 0.1s;
+}
+
+.settings-close-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+}
+
+.settings-section {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.settings-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--color-text-muted);
+  margin: 0;
+}
+
+.settings-desc {
+  font-size: 12px;
+  color: var(--color-text-muted);
+  line-height: 1.6;
+  margin: 0;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-label {
+  font-size: 13px;
+  color: var(--color-text);
+  width: 56px;
+  flex-shrink: 0;
+}
+
+.settings-input {
+  width: 90px;
+  padding: 6px 10px;
+  background: var(--color-surface-2);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 13px;
+  outline: none;
+  transition: border-color 0.1s;
+}
+
+.settings-input:focus {
+  border-color: var(--color-accent);
+}
+
+.settings-input-error {
+  border-color: var(--color-danger) !important;
+}
+
+.settings-save-btn {
+  padding: 6px 14px;
+  background: var(--color-accent);
+  color: white;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  font-weight: 500;
+  transition: background 0.1s;
+}
+
+.settings-save-btn:hover:not(:disabled) {
+  background: var(--color-accent-hover);
+}
+
+.settings-save-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.settings-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 99px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.settings-badge-ok {
+  background: rgba(82, 196, 113, 0.15);
+  color: var(--color-success);
+  border: 1px solid rgba(82, 196, 113, 0.3);
+}
+
+.settings-badge-error {
+  background: rgba(224, 82, 82, 0.12);
+  color: var(--color-danger);
+  border: 1px solid rgba(224, 82, 82, 0.3);
+  max-width: 280px;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+.settings-badge-idle {
+  background: var(--color-surface-2);
+  color: var(--color-text-muted);
+  border: 1px solid var(--color-border);
+}
+
+/* Settings gear button in tab bar spacer */
+.tab-bar-settings-btn {
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  margin-right: 6px;
+  transition: color 0.1s, background 0.1s;
+  -webkit-app-region: no-drag;
+}
+
+.tab-bar-settings-btn:hover {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+}

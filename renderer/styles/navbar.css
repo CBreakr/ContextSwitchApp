@@ -1,0 +1,67 @@
+.nav-bar {
+  display: flex;
+  align-items: center;
+  height: var(--nav-bar-height);
+  padding: 0 8px;
+  gap: 6px;
+}
+
+.nav-back-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-sm);
+  font-size: 20px;
+  color: var(--color-text-muted);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  line-height: 1;
+  transition: color 0.1s, background 0.1s;
+  flex-shrink: 0;
+}
+
+.nav-back-btn:not(:disabled):hover {
+  color: var(--color-text);
+  background: var(--color-surface-2);
+}
+
+.nav-back-btn:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.nav-breadcrumb {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+  flex: 1;
+}
+
+.nav-breadcrumb-sep {
+  color: var(--color-text-muted);
+  font-size: 14px;
+  flex-shrink: 0;
+}
+
+.nav-breadcrumb-current {
+  color: var(--color-text);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nav-breadcrumb-link {
+  color: var(--color-accent);
+  border-radius: var(--radius-sm);
+  padding: 2px 4px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition: background 0.1s;
+}
+
+.nav-breadcrumb-link:hover {
+  background: var(--color-highlight);
+}
