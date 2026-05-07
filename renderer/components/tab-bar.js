@@ -3,6 +3,7 @@ import { showContextMenu } from './context-menu.js';
 import { showConfirm, showAlert, showPrompt } from './dialogs.js';
 import { showArchiveOverlay } from './archive-view.js';
 
+
 let dragSrcIdx = null;
 
 export function renderTabBar(container, contexts, activeId) {
@@ -76,6 +77,13 @@ function buildTab(ctx, isActive, idx) {
   tab.addEventListener('contextmenu', (e) => {
     e.preventDefault();
     showContextMenu(e.clientX, e.clientY, [
+      {
+        label: 'Rename',
+        action: async () => {
+          const newName = await showPrompt('Rename context', ctx.name);
+          if (newName && newName.trim()) store.renameContext(ctx.id, newName.trim());
+        },
+      },
       {
         label: 'Archive',
         action: () => archiveContext(ctx),

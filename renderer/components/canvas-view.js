@@ -974,9 +974,11 @@ function attachNoteEvents(el, note, ctx) {
 
   el.appendChild(toolbar);
 
-  // Drag note
-  el.addEventListener('mousedown', (e) => {
-    if (e.target === toolbar || toolbar.contains(e.target)) return;
+  // Drag handle — a dedicated strip that doesn't conflict with contentEditable
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'canvas-note-drag-handle';
+  el.appendChild(dragHandle);
+  dragHandle.addEventListener('mousedown', (e) => {
     if (e.button !== 0) return;
     e.stopPropagation();
     startNoteDrag(e, note);
@@ -1024,15 +1026,6 @@ function startNoteDrag(startEv, note) {
       if (!obj) {
         store.updateNote(note.id, { anchor: { type: 'frame' }, x: origAbsX + dx, y: origAbsY + dy });
       } else {
-        const box = { x: obj.x, y: obj.y, w: obj.width, h: obj.height };
-        let cornerX, cornerY;
-        switch (note.anchor.corner) {
-          case 'top-left':     cornerX = box.x;          cornerY = box.y;          break;
-          case 'top-right':    cornerX = box.x + box.w;  cornerY = box.y;          break;
-          case 'bottom-left':  cornerX = box.x;          cornerY = box.y + box.h;  break;
-          case 'bottom-right': cornerX = box.x + box.w;  cornerY = box.y + box.h;  break;
-          default:             cornerX = box.x;          cornerY = box.y;
-        }
         store.updateNote(note.id, {
           x: note.x + dx,
           y: note.y + dy,

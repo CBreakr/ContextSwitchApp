@@ -305,3 +305,84 @@ Fix — two changes:
 
         /* was: var(--radius-md) var(--radius-md) 0 0  */
         border-radius: 0 0 var(--radius-md) var(--radius-md);
+
+
+─────────────────────────────────────────────────────────────────────────────
+10. RENAME CONTEXT VIA RIGHT-CLICK
+─────────────────────────────────────────────────────────────────────────────
+Problem: Contexts could only be renamed by double-clicking the tab label.
+There was no right-click menu option for rename.
+
+Fix: In renderer/components/tab-bar.js, inside buildTab(), add a 'Rename'
+entry to the contextmenu items array before 'Archive'. Use showPrompt (the
+same modal dialog used by the Add button) instead of startInlineRename.
+
+Attempting to call startInlineRename via the context menu fails because the
+context menu fires on mousedown, and the subsequent mouseup lands on the
+-webkit-app-region: drag area, which steals focus back immediately. The
+blur event then commits the rename with the unchanged name, making it
+appear to do nothing. showPrompt avoids this entirely.
+
+  {
+    label: 'Rename',
+    action: async () => {
+      const newName = await showPrompt('Rename context', ctx.name);
+      if (newName && newName.trim()) store.renameContext(ctx.id, newName.trim());
+    },
+  },
+
+(showPrompt is already imported from './dialogs.js'.)
+
+
+─────────────────────────────────────────────────────────────────────────────
+11. NOTE DRAG BROKEN
+─────────────────────────────────────────────────────────────────────────────
+Problem: Notes could not be repositioned by dragging. Two compounding causes:
+1. The note body is a contentEditable div. mousedown on it causes the browser
+   to start a text-selection drag, competing with the element-move drag.
+2. The blur event on the contentEditable calls store.updateNote, which
+   triggers a re-render and resets the note's visual position mid-drag.
+
+Fix: Replace the whole-note mousedown drag handler with a dedicated drag
+handle element that is visually separate from the text area.
+
+In renderer/components/canvas-view.js, inside attachNoteEvents(), replace the
+`el.addEventListener('mousedown', ...)` drag block with:
+
+  const dragHandle = document.createElement('div');
+  dragHandle.className = 'canvas-note-drag-handle';
+  el.appendChild(dragHandle);
+  dragHandle.addEventListener('mousedown', (e) => {
+    if (e.button !== 0) return;
+    e.stopPropagation();
+    startNoteDrag(e, note);
+  });
+
+In renderer/styles/notes.css, add styles for the handle (sits between the
+toolbar and the text area in the flex column; shows a faint pill indicator
+on hover):
+
+  .canvas-note-drag-handle {
+    width: 100%;
+    height: 8px;
+    cursor: grab;
+    flex-shrink: 0;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .canvas-note-drag-handle::after {
+    content: '';
+    width: 24px;
+    height: 3px;
+    border-radius: 2px;
+    background: rgba(255, 255, 255, 0.15);
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .canvas-note:hover .canvas-note-drag-handle::after { opacity: 1; }
+  .canvas-note-drag-handle:active { cursor: grabbing; }
+
+The drag handle sits above the text area but below the toolbar. Dragging from
+it does not interact with contentEditable at all.
