@@ -269,3 +269,39 @@ Add a .gitignore at the project root ignoring:
   .vscode/
   .idea/
   *.swp  *.swo
+
+
+─────────────────────────────────────────────────────────────────────────────
+9. OBJECT LABEL POSITION AND SIZE
+─────────────────────────────────────────────────────────────────────────────
+Problem: Object labels were displayed below the image/icon, and their font
+size (11px) was slightly too small.
+
+Fix — two changes:
+
+1. In renderer/components/canvas-view.js, inside buildObjectContent(), move
+   the label element to be created and appended BEFORE the image/icon block
+   rather than after. The container uses flex-direction: column so DOM order
+   controls visual order:
+
+     function buildObjectContent(el, obj) {
+       const label = document.createElement('div');
+       label.className = 'canvas-object-label';
+       label.textContent = obj.label;
+       el.appendChild(label);          // ← now first
+
+       if (obj.image) { ... }          // image appended after
+       else if (...application/file) { ... }
+       else if (...subcontext) { ... }
+     }
+
+2. In renderer/styles/objects.css:
+
+   a. Increase .canvas-object-label font-size from 11px to 12px.
+
+   b. Flip .canvas-object-image border-radius so the rounded corners are on
+      the bottom (matching the new position below the label) rather than the
+      top:
+
+        /* was: var(--radius-md) var(--radius-md) 0 0  */
+        border-radius: 0 0 var(--radius-md) var(--radius-md);

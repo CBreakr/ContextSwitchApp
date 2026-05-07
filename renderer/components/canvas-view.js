@@ -147,6 +147,11 @@ function upsertObjectEl(obj, ctx) {
 }
 
 function buildObjectContent(el, obj) {
+  const label = document.createElement('div');
+  label.className = 'canvas-object-label';
+  label.textContent = obj.label;
+  el.appendChild(label);
+
   if (obj.image) {
     const img = document.createElement('img');
     img.className = 'canvas-object-image';
@@ -162,11 +167,6 @@ function buildObjectContent(el, obj) {
   } else if (obj.type === 'subcontext') {
     el.classList.add('canvas-object-subcontext-frame');
   }
-
-  const label = document.createElement('div');
-  label.className = 'canvas-object-label';
-  label.textContent = obj.label;
-  el.appendChild(label);
 }
 
 async function loadIcon(obj, container) {
