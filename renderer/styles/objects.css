@@ -92,6 +92,13 @@
   outline-offset: 2px;
 }
 
+/* Sub-context highlighted as a drag-drop target */
+.canvas-object-drop-target {
+  outline: 2px solid var(--color-accent) !important;
+  outline-offset: 2px;
+  box-shadow: 0 0 20px rgba(91, 156, 246, 0.35) !important;
+}
+
 /* ── Resize handles ──────────────────────────────────────────────────────── */
 
 .resize-handle {

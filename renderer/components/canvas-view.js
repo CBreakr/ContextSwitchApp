@@ -293,6 +293,46 @@ function startObjectDrag(e, obj, ctx) {
 
   dragState = { type: 'object', obj, origX, origY, startX, startY, moveSet };
 
+  let dropTargetId = null; // sub-context we're hovering over as a drop target
+
+  function clearDropTarget() {
+    if (dropTargetId) {
+      worldEl.querySelector(`.canvas-object[data-id="${dropTargetId}"]`)
+        ?.classList.remove('canvas-object-drop-target');
+      dropTargetId = null;
+    }
+  }
+
+  function updateDropTarget(e2) {
+    // Don't allow dropping sub-contexts into sub-contexts to keep things simple
+    if (obj.type === 'ellipse' || obj.type === 'line') return;
+
+    const vpRect = vpEl.getBoundingClientRect();
+    const worldX = (e2.clientX - vpRect.left - currentVp.offsetX) / currentVp.scale;
+    const worldY = (e2.clientY - vpRect.top  - currentVp.offsetY) / currentVp.scale;
+
+    let newTarget = null;
+    for (const candidate of ctx.canvas.objects) {
+      if (candidate.archived) continue;
+      if (candidate.type !== 'subcontext') continue;
+      if (candidate.id === obj.id) continue;
+      if (worldX >= candidate.x && worldX <= candidate.x + candidate.width &&
+          worldY >= candidate.y && worldY <= candidate.y + candidate.height) {
+        newTarget = candidate.id;
+        break;
+      }
+    }
+
+    if (newTarget !== dropTargetId) {
+      clearDropTarget();
+      if (newTarget) {
+        worldEl.querySelector(`.canvas-object[data-id="${newTarget}"]`)
+          ?.classList.add('canvas-object-drop-target');
+        dropTargetId = newTarget;
+      }
+    }
+  }
+
   const onMove = (e2) => {
     if (!dragState || dragState.type !== 'object') return;
     const dx = (e2.clientX - startX) / currentVp.scale;
@@ -300,17 +340,10 @@ function startObjectDrag(e, obj, ctx) {
     if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragMoved = true;
 
     if (moveSet) {
-      // Move all objects in moveSet
       for (const id of moveSet) {
         const target = ctx.canvas.objects.find(o => o.id === id);
         if (!target) continue;
-        if (target.type === 'ellipse') {
-          const ep = target.center;
-          if (ep.type === 'canvas') {
-            const el = worldEl.querySelector(`.canvas-object[data-id="${id}"]`);
-            // Ellipses are SVG, not DOM
-          }
-        } else {
+        if (target.type !== 'ellipse') {
           const el = worldEl.querySelector(`.canvas-object[data-id="${id}"]`);
           if (el) {
             const startObjX = ctx.canvas.objects.find(o => o.id === id)?.x ?? 0;
@@ -328,11 +361,15 @@ function startObjectDrag(e, obj, ctx) {
       }
     }
     updateSvgLayerDuringDrag(ctx, obj.id, moveSet, dx, dy);
+    updateDropTarget(e2);
   };
 
   const onUp = (e2) => {
     document.removeEventListener('mousemove', onMove);
     document.removeEventListener('mouseup', onUp);
+
+    const finalDropTarget = dropTargetId; // capture before clearDropTarget() nulls it
+    clearDropTarget();
 
     if (!dragState) return;
     const dx = (e2.clientX - startX) / currentVp.scale;
@@ -340,7 +377,14 @@ function startObjectDrag(e, obj, ctx) {
 
     if (Math.abs(dx) < 1 && Math.abs(dy) < 1) { dragState = null; return; }
 
-    if (moveSet) {
+    if (finalDropTarget) {
+      const subCtxObj = ctx.canvas.objects.find(o => o.id === finalDropTarget);
+      const subVp = subCtxObj?.context.canvas.viewport ?? { scale: 1, offsetX: 0, offsetY: 0 };
+      const vpRect = vpEl.getBoundingClientRect();
+      const newX = Math.max(0, (vpRect.width  / 2 - subVp.offsetX) / subVp.scale);
+      const newY = Math.max(0, (vpRect.height / 2 - subVp.offsetY) / subVp.scale);
+      store.transferObject(currentContextId, obj.id, finalDropTarget, newX, newY);
+    } else if (moveSet) {
       store.moveObjects(currentContextId, moveSet, dx, dy);
     } else {
       store.updateObject(obj.id, {
@@ -349,7 +393,6 @@ function startObjectDrag(e, obj, ctx) {
       });
     }
     dragState = null;
-    // store.updateObject triggers re-render via notify
   };
 
   document.addEventListener('mousemove', onMove);

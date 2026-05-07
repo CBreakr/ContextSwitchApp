@@ -386,3 +386,72 @@ on hover):
 
 The drag handle sits above the text area but below the toolbar. Dragging from
 it does not interact with contentEditable at all.
+
+
+─────────────────────────────────────────────────────────────────────────────
+12. DRAG OBJECT INTO A SUB-CONTEXT
+─────────────────────────────────────────────────────────────────────────────
+Feature: Dragging a canvas object and dropping it onto a sub-context tile
+removes it from the current context and adds it as a child of that
+sub-context. The object is placed at the centre of the sub-context's stored
+viewport so it is immediately visible when the user navigates into it.
+
+Lines and ellipses are excluded (their coordinate systems involve complex
+cross-object references that don't translate cleanly across canvas boundaries).
+
+Changes:
+
+1. renderer/store.js — add transferObject():
+
+   transferObject(fromContextId, objectId, toSubContextObjId, newX, newY) {
+     // Guards: both IDs must exist in fromCtx; target must be a subcontext;
+     // object cannot be dropped onto itself.
+     // Steps:
+     //   1. Call _revertReferences(fromCtx, objectId) to fix dangling endpoints/notes.
+     //   2. Remove object from fromCtx.canvas.objects.
+     //   3. Remove objectId from any ellipse containedIds in fromCtx.
+     //   4. Clone the object with { x: newX, y: newY }.
+     //   5. For line type: revert any 'anchored' endpoints to canvas coords.
+     //   6. For ellipse type: revert anchored center; clear containedIds.
+     //   7. Push the clone into subCtxObj.context.canvas.objects.
+     //   8. _persist() and _notify().
+   }
+
+2. renderer/components/canvas-view.js — update startObjectDrag():
+
+   - Add a dropTargetId variable (null or the id of a hovered sub-context).
+   - Add clearDropTarget(): removes 'canvas-object-drop-target' CSS class.
+   - Add updateDropTarget(e2): converts mouse to world coordinates using the
+     viewport rect and currentVp transform, then checks each non-archived
+     sub-context object's bounding box. Sets/clears dropTargetId and toggles
+     the CSS class on the matching element.
+   - Call updateDropTarget(e2) at the end of onMove.
+   - In onUp, call clearDropTarget() first. Then:
+       if (dropTargetId) → call store.transferObject(); place object at the
+         centre of the sub-context's stored viewport (computed from vpEl rect
+         and subVp.offsetX/Y and subVp.scale).
+       else if (moveSet) → existing store.moveObjects() path.
+       else → existing store.updateObject() path.
+
+   World coordinate conversion (screen → world):
+     const vpRect = vpEl.getBoundingClientRect();
+     const worldX = (e2.clientX - vpRect.left - currentVp.offsetX) / currentVp.scale;
+     const worldY = (e2.clientY - vpRect.top  - currentVp.offsetY) / currentVp.scale;
+
+   Sub-context viewport centre for drop placement:
+     const newX = Math.max(0, (vpRect.width  / 2 - subVp.offsetX) / subVp.scale);
+     const newY = Math.max(0, (vpRect.height / 2 - subVp.offsetY) / subVp.scale);
+
+   IMPORTANT: in onUp, capture dropTargetId into a local variable BEFORE
+   calling clearDropTarget(), which sets dropTargetId to null:
+     const finalDropTarget = dropTargetId;
+     clearDropTarget();
+     // then use finalDropTarget, not dropTargetId
+
+3. renderer/styles/objects.css — add drop-target highlight:
+
+   .canvas-object-drop-target {
+     outline: 2px solid var(--color-accent) !important;
+     outline-offset: 2px;
+     box-shadow: 0 0 20px rgba(91, 156, 246, 0.35) !important;
+   }

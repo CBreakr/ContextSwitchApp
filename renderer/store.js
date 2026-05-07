@@ -297,6 +297,50 @@ class Store {
     this._persist();
   }
 
+  transferObject(fromContextId, objectId, toSubContextObjId, newX, newY) {
+    const fromCtx = this._findContextById(fromContextId);
+    if (!fromCtx) return false;
+    if (objectId === toSubContextObjId) return false;
+
+    const obj = fromCtx.canvas.objects.find(o => o.id === objectId);
+    if (!obj) return false;
+
+    const subCtxObj = fromCtx.canvas.objects.find(
+      o => o.id === toSubContextObjId && o.type === 'subcontext'
+    );
+    if (!subCtxObj) return false;
+
+    // Clean up references in the source context
+    this._revertReferences(fromCtx, objectId);
+    fromCtx.canvas.objects = fromCtx.canvas.objects.filter(o => o.id !== objectId);
+    for (const o of fromCtx.canvas.objects) {
+      if (o.type === 'ellipse') {
+        o.containedIds = (o.containedIds || []).filter(id => id !== objectId);
+      }
+    }
+
+    // Build transferred object with new position
+    const transferred = { ...obj, x: newX, y: newY };
+
+    // Revert any endpoints anchored to objects that stay in the parent
+    if (transferred.type === 'line') {
+      if (transferred.start?.type === 'anchored')
+        transferred.start = { type: 'canvas', x: newX, y: newY };
+      if (transferred.end?.type === 'anchored')
+        transferred.end = { type: 'canvas', x: newX + 100, y: newY };
+    }
+    if (transferred.type === 'ellipse') {
+      if (transferred.center?.type === 'anchored')
+        transferred.center = { type: 'canvas', x: newX, y: newY };
+      transferred.containedIds = [];
+    }
+
+    subCtxObj.context.canvas.objects.push(transferred);
+    this._persist();
+    this._notify();
+    return true;
+  }
+
   canArchiveOrDeleteObject(obj) {
     return obj.archived !== undefined || true;
   }
