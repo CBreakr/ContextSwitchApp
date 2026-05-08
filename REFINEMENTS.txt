@@ -513,3 +513,108 @@ B. "Open With" in file/folder dialogs now uses a searchable app picker list
    buildAppPicker(obj.defaultApp). In the commit, resolve updates.defaultApp
    from fileAppPicker?.getSelectedApp()?.bundlePath, falling back to
    obj.defaultApp || '/usr/bin/open'.
+
+
+─────────────────────────────────────────────────────────────────────────────
+14. APP LIST TRUNCATION FIXES AND APP PICKER UX IMPROVEMENTS
+─────────────────────────────────────────────────────────────────────────────
+Several follow-up fixes to the app picker introduced in section 13:
+
+A. App list was truncated — two sources:
+
+1. main.js — the mdfind command piped through `| head -500`, capping results
+   before the .app filter was applied. Remove the pipe entirely:
+
+   exec("mdfind \"kMDItemKind == 'Application'\" 2>/dev/null",  /* no head */
+
+2. renderer/components/dialogs.js — both showApplicationDialog and
+   buildAppPicker called filtered.slice(0, 200) before rendering rows.
+   Remove all slice(0, 200) calls so all returned apps are rendered.
+
+B. buildAppPicker had a flex layout bug causing the list to not scroll
+   properly when used inside a file dialog. The intermediate container div
+   was a plain div, so the dialog-app-list's flex:1 had no effect.
+
+   Fix: give the container explicit flex styling so it participates in the
+   dialog's column layout, and give listEl an explicit min-height:
+
+   container.style.cssText = 'display:flex;flex-direction:column;gap:8px;flex:1;min-height:0;';
+   listEl.style.cssText = 'flex:1;min-height:120px;max-height:220px;';
+
+C. buildAppPicker redesigned as a collapsible dropdown with a display field.
+
+   The old design showed the search + list always expanded with no feedback
+   on selection. New design:
+
+   - A display div (styled to match dialog-input) shows "None — system
+     default" or the selected app name. Clicking it toggles the panel open/
+     closed. Hover highlights the border in accent colour.
+   - A chevron (▾/▴) indicates collapsed/expanded state.
+   - Selecting an app from the list: updates the display text, clears the
+     search input, and collapses the panel.
+   - preSelectedBundlePath: panel starts collapsed with the app name shown;
+     no preselection: panel starts expanded and focuses the search input.
+
+   Key: `panelOpen = !preSelectedBundlePath` sets initial state; setOpen()
+   handles both panel.style.display and chevron symbol together.
+
+D. file:open IPC handler was ignoring the app argument.
+
+   main.js — old handler: `shell.openPath(filePath)` (ignored app param).
+   New handler uses `open -a <AppPath> <FilePath>` via exec() when a
+   specific app bundle path is provided, falling back to shell.openPath
+   for the system default (/usr/bin/open):
+
+   ipcMain.handle('file:open', (_e, filePath, appPath) => {
+     if (appPath && appPath !== '/usr/bin/open') {
+       return new Promise(resolve => {
+         exec(`open -a ${JSON.stringify(appPath)} ${JSON.stringify(filePath)}`,
+           err => resolve(!err));
+       });
+     }
+     return shell.openPath(filePath);
+   });
+
+
+─────────────────────────────────────────────────────────────────────────────
+15. CUSTOM IMAGES FOR APPLICATION, FILE, AND SUB-CONTEXT OBJECTS
+─────────────────────────────────────────────────────────────────────────────
+Users can now attach a custom image to application, file/folder, and
+sub-context objects, both during creation and via Edit Properties. When set,
+the image renders as a cover (same as website screenshot) instead of the
+system icon or empty frame.
+
+1. main.js — add dialog:openImage IPC handler. Opens a native file picker
+   filtered to image extensions (png, jpg, jpeg, gif, webp, svg), reads the
+   selected file with fs.promises.readFile, and returns a base64 data URL.
+   fs and path are already imported.
+
+2. preload.js — expose as window.api.file.pickImage:
+     pickImage: () => ipcRenderer.invoke('dialog:openImage'),
+
+3. renderer/components/dialogs.js — add buildImagePicker(currentImage) helper.
+   Returns { el, getImage() }. el contains:
+   - A preview div (80px tall) showing the image or "No image" placeholder.
+   - A "Choose Image…" button calling window.api.file.pickImage() and
+     updating the preview on success.
+   - A "Clear" button setting imageData back to null.
+
+4. showApplicationDialog — add a "Custom Image (optional)" label and
+   buildImagePicker() above the action row. Pass imagePicker.getImage() as
+   the image field in the resolved object (replaces hardcoded image: null).
+
+5. showFileDialog — same: add label and buildImagePicker() below the app
+   picker. Pass imagePicker.getImage() in the resolved object.
+
+6. showSubContextDialog — add dialog-wide class to box (was plain dialog-box),
+   add label and buildImagePicker() above actions. Pass image: result.image
+   in canvas-view.js where the subcontext object is constructed (was
+   hardcoded image: null).
+
+7. showObjectPropertiesDialog — for application, file, and subcontext types,
+   add label and buildImagePicker(obj.image) pre-populated with the current
+   image. In the commit handler, set updates.image = editImagePicker.getImage().
+
+8. canvas-view.js — no rendering changes needed. buildObjectContent() already
+   checks if (obj.image) and renders a full canvas-object-image; the system
+   icon path (loadIcon) is only reached when obj.image is falsy.
