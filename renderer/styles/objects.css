@@ -64,11 +64,28 @@
   gap: 4px;
 }
 
-/* File: folder frame style */
+/* File: folder shape */
 .canvas-object-file {
   padding: 8px;
-  gap: 4px;
-  border-style: dashed;
+  gap: 6px;
+  overflow: visible;
+  border-style: solid;
+  border-color: #4a8fb5;
+  border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+  background: #192c3a;
+}
+
+.canvas-object-file::before {
+  content: '';
+  position: absolute;
+  top: -13px;
+  left: -1px;
+  width: min(48%, 88px);
+  height: 14px;
+  background: #192c3a;
+  border: 1px solid #4a8fb5;
+  border-bottom: none;
+  border-radius: var(--radius-sm) var(--radius-sm) 0 0;
 }
 
 /* Sub-context: labeled frame */

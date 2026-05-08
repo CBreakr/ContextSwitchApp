@@ -266,6 +266,13 @@ export function showApplicationDialog(dropPos) {
     listEl.textContent = 'Loading…';
     box.appendChild(listEl);
 
+    const imgLabel = document.createElement('label');
+    imgLabel.className = 'dialog-field-label';
+    imgLabel.textContent = 'Custom Image (optional)';
+    box.appendChild(imgLabel);
+    const imagePicker = buildImagePicker();
+    box.appendChild(imagePicker.el);
+
     let allApps = [];
     let selectedApp = null;
 
@@ -278,7 +285,7 @@ export function showApplicationDialog(dropPos) {
         listEl.textContent = 'No apps found';
         return;
       }
-      for (const app of filtered.slice(0, 200)) {
+      for (const app of filtered) {
         const row = document.createElement('div');
         row.className = 'dialog-app-row';
         if (selectedApp?.bundlePath === app.bundlePath) row.classList.add('dialog-app-row-selected');
@@ -320,7 +327,7 @@ export function showApplicationDialog(dropPos) {
         bundlePath: selectedApp.bundlePath,
         appName: selectedApp.appName,
         label: selectedApp.appName,
-        image: null,
+        image: imagePicker.getImage(),
         ...dropPos,
       });
     }
@@ -335,7 +342,7 @@ export function showFileDialog(dropPos) {
     if (!filePath) { resolve(null); return; }
 
     const box = document.createElement('div');
-    box.className = 'dialog-box';
+    box.className = 'dialog-box dialog-wide';
 
     const h = document.createElement('h2');
     h.className = 'dialog-title';
@@ -348,15 +355,28 @@ export function showFileDialog(dropPos) {
     box.appendChild(pathRow);
 
     box.appendChild(labeledInput('Label', 'file-label', filePath.split('/').pop()));
-    box.appendChild(labeledInput('Open with (app path)', 'file-default-app', '/usr/bin/open'));
+
+    const openWithLabel = document.createElement('label');
+    openWithLabel.className = 'dialog-field-label';
+    openWithLabel.textContent = 'Open With';
+    box.appendChild(openWithLabel);
+    const appPicker = buildAppPicker();
+    box.appendChild(appPicker.el);
+
+    const imgLabel = document.createElement('label');
+    imgLabel.className = 'dialog-field-label';
+    imgLabel.textContent = 'Custom Image (optional)';
+    box.appendChild(imgLabel);
+    const imagePicker = buildImagePicker();
+    box.appendChild(imagePicker.el);
 
     const actions = actionRow(
       () => { closeDialog(); resolve(null); },
       () => {
         const label      = box.querySelector('#file-label').value.trim() || filePath.split('/').pop();
-        const defaultApp = box.querySelector('#file-default-app').value.trim() || '/usr/bin/open';
+        const defaultApp = appPicker.getSelectedApp()?.bundlePath || '/usr/bin/open';
         closeDialog();
-        resolve({ type: 'file', path: filePath, label, defaultApp, image: null, ...dropPos });
+        resolve({ type: 'file', path: filePath, label, defaultApp, image: imagePicker.getImage(), ...dropPos });
       },
       'Add'
     );
@@ -370,7 +390,7 @@ export function showFileDialog(dropPos) {
 export function showSubContextDialog(dropPos) {
   return new Promise((resolve) => {
     const box = document.createElement('div');
-    box.className = 'dialog-box';
+    box.className = 'dialog-box dialog-wide';
 
     const h = document.createElement('h2');
     h.className = 'dialog-title';
@@ -379,13 +399,20 @@ export function showSubContextDialog(dropPos) {
 
     box.appendChild(labeledInput('Name', 'subctx-name', 'Sub-context'));
 
+    const imgLabel = document.createElement('label');
+    imgLabel.className = 'dialog-field-label';
+    imgLabel.textContent = 'Custom Image (optional)';
+    box.appendChild(imgLabel);
+    const imagePicker = buildImagePicker();
+    box.appendChild(imagePicker.el);
+
     const actions = actionRow(
       () => { closeDialog(); resolve(null); },
       () => {
         const name = box.querySelector('#subctx-name').value.trim();
         if (!name) return;
         closeDialog();
-        resolve({ name, ...dropPos });
+        resolve({ name, image: imagePicker.getImage(), ...dropPos });
       },
       'Create'
     );
@@ -416,9 +443,25 @@ export function showObjectPropertiesDialog(obj) {
       box.appendChild(labeledInput('Bundle Path', 'obj-bundle', obj.bundlePath));
       box.appendChild(labeledInput('App Name', 'obj-appname', obj.appName));
     }
+    let fileAppPicker = null;
     if (obj.type === 'file') {
       box.appendChild(labeledInput('Path', 'obj-path', obj.path));
-      box.appendChild(labeledInput('Open With', 'obj-defaultapp', obj.defaultApp));
+      const openWithLabel = document.createElement('label');
+      openWithLabel.className = 'dialog-field-label';
+      openWithLabel.textContent = 'Open With';
+      box.appendChild(openWithLabel);
+      fileAppPicker = buildAppPicker(obj.defaultApp);
+      box.appendChild(fileAppPicker.el);
+    }
+
+    let editImagePicker = null;
+    if (obj.type === 'application' || obj.type === 'file' || obj.type === 'subcontext') {
+      const imgLabel = document.createElement('label');
+      imgLabel.className = 'dialog-field-label';
+      imgLabel.textContent = 'Custom Image (optional)';
+      box.appendChild(imgLabel);
+      editImagePicker = buildImagePicker(obj.image);
+      box.appendChild(editImagePicker.el);
     }
 
     const actions = actionRow(
@@ -432,8 +475,9 @@ export function showObjectPropertiesDialog(obj) {
         }
         if (obj.type === 'file') {
           updates.path       = box.querySelector('#obj-path').value.trim();
-          updates.defaultApp = box.querySelector('#obj-defaultapp').value.trim();
+          updates.defaultApp = fileAppPicker?.getSelectedApp()?.bundlePath || obj.defaultApp || '/usr/bin/open';
         }
+        if (editImagePicker) updates.image = editImagePicker.getImage();
         closeDialog();
         resolve(updates);
       },
@@ -552,6 +596,163 @@ function labeledInput(labelText, id, defaultValue = '') {
   row.appendChild(lbl);
   row.appendChild(input);
   return row;
+}
+
+function buildImagePicker(currentImage = null) {
+  const container = document.createElement('div');
+  container.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+  const preview = document.createElement('div');
+  preview.style.cssText = [
+    'width:100%;height:80px;background:var(--color-surface-2);',
+    'border:1px solid var(--color-border);border-radius:var(--radius-sm);',
+    'display:flex;align-items:center;justify-content:center;overflow:hidden;',
+  ].join('');
+
+  let imageData = currentImage || null;
+
+  const renderPreview = () => {
+    preview.innerHTML = '';
+    if (imageData) {
+      const img = document.createElement('img');
+      img.src = imageData;
+      img.style.cssText = 'max-width:100%;max-height:100%;object-fit:contain;';
+      preview.appendChild(img);
+    } else {
+      const placeholder = document.createElement('span');
+      placeholder.style.cssText = 'font-size:11px;color:var(--color-text-muted);';
+      placeholder.textContent = 'No image';
+      preview.appendChild(placeholder);
+    }
+  };
+  renderPreview();
+  container.appendChild(preview);
+
+  const btnRow = document.createElement('div');
+  btnRow.style.cssText = 'display:flex;gap:6px;';
+
+  const chooseBtn = document.createElement('button');
+  chooseBtn.className = 'dialog-btn dialog-btn-secondary dialog-btn-sm';
+  chooseBtn.textContent = 'Choose Image…';
+  chooseBtn.addEventListener('click', async () => {
+    const data = await window.api.file.pickImage();
+    if (data) { imageData = data; renderPreview(); }
+  });
+  btnRow.appendChild(chooseBtn);
+
+  const clearBtn = document.createElement('button');
+  clearBtn.className = 'dialog-btn dialog-btn-secondary dialog-btn-sm';
+  clearBtn.textContent = 'Clear';
+  clearBtn.addEventListener('click', () => { imageData = null; renderPreview(); });
+  btnRow.appendChild(clearBtn);
+
+  container.appendChild(btnRow);
+
+  return {
+    el: container,
+    getImage: () => imageData,
+  };
+}
+
+function buildAppPicker(preSelectedBundlePath = null) {
+  const container = document.createElement('div');
+  container.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+  // Display field — shows current selection, click to toggle dropdown
+  const displayEl = document.createElement('div');
+  displayEl.style.cssText = [
+    'display:flex;align-items:center;justify-content:space-between;',
+    'padding:7px 10px;background:var(--color-surface-2);',
+    'border:1px solid var(--color-border);border-radius:var(--radius-sm);',
+    'color:var(--color-text);font-size:13px;cursor:pointer;user-select:none;',
+    'transition:border-color 0.1s;box-sizing:border-box;width:100%;',
+  ].join('');
+  const displayText = document.createElement('span');
+  displayText.textContent = 'None — system default';
+  const chevron = document.createElement('span');
+  chevron.style.cssText = 'font-size:10px;opacity:0.5;flex-shrink:0;margin-left:8px;';
+  chevron.textContent = '▾';
+  displayEl.appendChild(displayText);
+  displayEl.appendChild(chevron);
+  container.appendChild(displayEl);
+
+  // Collapsible panel: search + list
+  const panel = document.createElement('div');
+  panel.style.cssText = 'display:flex;flex-direction:column;gap:6px;';
+
+  const searchInput = document.createElement('input');
+  searchInput.type = 'text';
+  searchInput.className = 'dialog-input';
+  searchInput.placeholder = 'Search applications…';
+  panel.appendChild(searchInput);
+
+  const listEl = document.createElement('div');
+  listEl.className = 'dialog-app-list';
+  listEl.style.cssText = 'min-height:120px;max-height:200px;';
+  listEl.textContent = 'Loading…';
+  panel.appendChild(listEl);
+  container.appendChild(panel);
+
+  let allApps = [];
+  let selectedApp = null;
+  let panelOpen = !preSelectedBundlePath;
+
+  const setOpen = (open) => {
+    panelOpen = open;
+    panel.style.display = open ? 'flex' : 'none';
+    chevron.textContent = open ? '▴' : '▾';
+    if (open) setTimeout(() => searchInput.focus(), 0);
+  };
+  setOpen(panelOpen);
+
+  displayEl.addEventListener('mouseenter', () => { displayEl.style.borderColor = 'var(--color-accent)'; });
+  displayEl.addEventListener('mouseleave', () => { displayEl.style.borderColor = ''; });
+  displayEl.addEventListener('click', () => setOpen(!panelOpen));
+
+  const renderList = (filter) => {
+    listEl.innerHTML = '';
+    const filtered = filter
+      ? allApps.filter(a => a.appName.toLowerCase().includes(filter.toLowerCase()))
+      : allApps;
+    if (filtered.length === 0) {
+      listEl.textContent = 'No apps found';
+      return;
+    }
+    for (const app of filtered) {
+      const row = document.createElement('div');
+      row.className = 'dialog-app-row';
+      if (selectedApp?.bundlePath === app.bundlePath) row.classList.add('dialog-app-row-selected');
+      row.textContent = app.appName;
+      row.addEventListener('click', () => {
+        selectedApp = app;
+        displayText.textContent = app.appName;
+        searchInput.value = '';
+        setOpen(false);
+        renderList('');
+      });
+      listEl.appendChild(row);
+    }
+    if (selectedApp) {
+      const sel = listEl.querySelector('.dialog-app-row-selected');
+      if (sel) sel.scrollIntoView({ block: 'center' });
+    }
+  };
+
+  searchInput.addEventListener('input', () => renderList(searchInput.value));
+
+  window.api.apps.list().then(apps => {
+    allApps = apps;
+    if (preSelectedBundlePath) {
+      selectedApp = apps.find(a => a.bundlePath === preSelectedBundlePath) || null;
+      if (selectedApp) displayText.textContent = selectedApp.appName;
+    }
+    renderList('');
+  });
+
+  return {
+    el: container,
+    getSelectedApp: () => selectedApp,
+  };
 }
 
 function actionRow(onCancel, onConfirm, confirmLabel = 'OK') {

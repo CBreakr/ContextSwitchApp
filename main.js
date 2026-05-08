@@ -240,7 +240,7 @@ ipcMain.handle('state:save', (_e, state) => {
 // ── IPC: system ────────────────────────────────────────────────────────────
 
 ipcMain.handle('apps:list', () => new Promise(resolve => {
-  exec("mdfind \"kMDItemKind == 'Application'\" 2>/dev/null | head -500",
+  exec("mdfind \"kMDItemKind == 'Application'\" 2>/dev/null",
     { maxBuffer: 5 * 1024 * 1024 }, (err, stdout) => {
       if (err) { resolve([]); return; }
       const apps = stdout.trim().split('\n')
@@ -256,13 +256,32 @@ ipcMain.handle('file:icon', async (_e, filePath) => {
   catch (e) { return null; }
 });
 
-ipcMain.handle('file:open',  (_e, filePath) => shell.openPath(filePath));
+ipcMain.handle('file:open', (_e, filePath, appPath) => {
+  if (appPath && appPath !== '/usr/bin/open') {
+    return new Promise(resolve => {
+      exec(`open -a ${JSON.stringify(appPath)} ${JSON.stringify(filePath)}`, err => resolve(!err));
+    });
+  }
+  return shell.openPath(filePath);
+});
 ipcMain.handle('app:launch', (_e, bundlePath) => shell.openPath(bundlePath));
 ipcMain.handle('url:open',   (_e, url) => shell.openExternal(url));
 
 ipcMain.handle('dialog:openFile', async () => {
   const r = await dialog.showOpenDialog(mainWindow, { properties: ['openFile', 'openDirectory'] });
   return r.canceled ? null : r.filePaths[0];
+});
+
+ipcMain.handle('dialog:openImage', async () => {
+  const r = await dialog.showOpenDialog(mainWindow, {
+    properties: ['openFile'],
+    filters: [{ name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'] }],
+  });
+  if (r.canceled || !r.filePaths[0]) return null;
+  const data = await fs.promises.readFile(r.filePaths[0]);
+  const ext = path.extname(r.filePaths[0]).slice(1).toLowerCase();
+  const mime = ext === 'svg' ? 'image/svg+xml' : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+  return `data:${mime};base64,${data.toString('base64')}`;
 });
 
 ipcMain.handle('web:screenshot', async (_e, url) => new Promise(resolve => {

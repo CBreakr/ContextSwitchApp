@@ -1257,7 +1257,7 @@ async function createObjectFromDrop(type, world, template, ctx) {
       ...dropPos,
       type: 'subcontext',
       label: result.name,
-      image: null,
+      image: result.image || null,
       context: subCtx,
       attachedNoteIds: [],
       archived: false,

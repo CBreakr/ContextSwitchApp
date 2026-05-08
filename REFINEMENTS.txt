@@ -455,3 +455,61 @@ Changes:
      outline-offset: 2px;
      box-shadow: 0 0 20px rgba(91, 156, 246, 0.35) !important;
    }
+
+
+─────────────────────────────────────────────────────────────────────────────
+13. FILE/FOLDER FOLDER-SHAPE DISPLAY AND APP PICKER FOR "OPEN WITH"
+─────────────────────────────────────────────────────────────────────────────
+Two sub-changes bundled together:
+
+A. File/folder objects now render with a folder icon shape.
+
+1. renderer/styles/objects.css — replace the old dashed-border .canvas-object-file
+   rule with a solid-border folder shape that uses ::before for the tab:
+
+   .canvas-object-file {
+     padding: 8px;
+     gap: 6px;
+     overflow: visible;          /* allows ::before tab to extend above bounds */
+     border-style: solid;
+     border-color: #4a8fb5;
+     border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+     background: #192c3a;
+   }
+
+   .canvas-object-file::before {
+     content: '';
+     position: absolute;
+     top: -13px;
+     left: -1px;
+     width: min(48%, 88px);
+     height: 14px;
+     background: #192c3a;
+     border: 1px solid #4a8fb5;
+     border-bottom: none;
+     border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+   }
+
+   KEY: overflow: visible is required so that the ::before pseudo-element
+   (position: absolute; top: -13px) is not clipped by the parent canvas
+   container's overflow: hidden. The ::before extends above the element's
+   own bounds and the parent must allow that.
+
+B. "Open With" in file/folder dialogs now uses a searchable app picker list
+   (same UI as the application object picker) instead of a plain text input.
+
+1. renderer/components/dialogs.js — add a buildAppPicker(preSelectedBundlePath)
+   helper function. It returns { el, getSelectedApp() }. el contains a search
+   input and a .dialog-app-list div; it loads apps asynchronously via
+   window.api.apps.list() and pre-selects an entry by bundlePath if provided.
+
+2. showFileDialog — change box to dialog-wide, remove the plain-text "Open with
+   (app path)" labeledInput, add a label element and buildAppPicker() below the
+   Label field. In the commit, resolve defaultApp from appPicker.getSelectedApp()
+   ?.bundlePath, falling back to '/usr/bin/open'.
+
+3. showObjectPropertiesDialog — for obj.type === 'file', remove the plain-text
+   labeledInput for 'Open With', add a label element and
+   buildAppPicker(obj.defaultApp). In the commit, resolve updates.defaultApp
+   from fileAppPicker?.getSelectedApp()?.bundlePath, falling back to
+   obj.defaultApp || '/usr/bin/open'.

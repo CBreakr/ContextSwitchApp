@@ -14,9 +14,10 @@ contextBridge.exposeInMainWorld('api', {
   onExternalUpdate: (fn) => ipcRenderer.on('state-updated-externally', fn),
   apps:  { list:       ()             => ipcRenderer.invoke('apps:list') },
   file:  {
-    icon: (p)           => ipcRenderer.invoke('file:icon', p),
-    open: (p, a)        => ipcRenderer.invoke('file:open', p, a),
-    pick: ()            => ipcRenderer.invoke('dialog:openFile'),
+    icon:      (p)      => ipcRenderer.invoke('file:icon', p),
+    open:      (p, a)   => ipcRenderer.invoke('file:open', p, a),
+    pick:      ()       => ipcRenderer.invoke('dialog:openFile'),
+    pickImage: ()       => ipcRenderer.invoke('dialog:openImage'),
   },
   app:   { launch:     (p)            => ipcRenderer.invoke('app:launch', p) },
   url:   { open:       (u)            => ipcRenderer.invoke('url:open', u) },
