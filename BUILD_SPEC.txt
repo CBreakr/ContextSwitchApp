@@ -1,0 +1,940 @@
+ContextSwitch — Complete Build Specification
+============================================================
+This document is the single source of truth for building ContextSwitch from
+scratch to its current state. It integrates the original design brief with
+every correction and refinement applied during development. Work through the
+sections in order; later sections depend on earlier ones.
+
+Document Conventions
+  [Rule]         — a binding requirement.
+  [Clarification]— a tie-breaker for ambiguous cases; same weight as a Rule.
+  [Gotcha]       — a known pitfall discovered during development; heed these
+                   to avoid having to redo work.
+  → in ordered lists means strict dependency: do not begin the next item until
+    the previous is complete.
+
+
+════════════════════════════════════════════════════════════════════════════════
+STANDING DECISIONS
+════════════════════════════════════════════════════════════════════════════════
+
+  Concern               Decision
+  ──────────────────    ────────────────────────────────────────────────────────
+  State persistence     Single JSON file (Electron userData directory)
+  Distribution          .app bundle (and optionally .dmg) via electron-builder
+  CSS                   Plain .css files with human-readable class names.
+                        No CSS-in-JS, no programmatic style generation.
+  Note templates        Global across all contexts
+  Ellipse containment   Physical as well as visual — dragging an ellipse moves
+                        every object in its containedIds by the same delta
+                        simultaneously
+
+
+════════════════════════════════════════════════════════════════════════════════
+1. DATA MODEL
+════════════════════════════════════════════════════════════════════════════════
+
+Define and validate the complete JSON schema before writing any UI. All
+application state serialises to and deserialises from a single JSON file
+stored at app.getPath('userData')/state.json.
+
+Root
+────
+{
+  "version": 1,
+  "contexts": [ ...Context ],
+  "noteTemplates": [ ...NoteTemplate ]
+}
+
+Context
+───────
+Represents a top-level workspace. The same type is used recursively for
+sub-contexts.
+
+  id:       string
+  name:     string
+  canvas:   Canvas
+  archived: boolean
+
+Canvas
+  objects:  [ ...CanvasObject ]
+  notes:    [ ...Note ]
+  viewport: { scale: number, offsetX: number, offsetY: number }
+
+[Clarification] The canvas coordinate system has its origin at (0, 0) with
+x increasing rightward and y increasing downward. offsetX, offsetY describe
+the canvas position that maps to the viewport's top-left corner.
+
+CanvasObject
+────────────
+A discriminated union on `type`. Every object carries these shared fields:
+
+  id:              string
+  type:            string        // discriminant
+  label:           string
+  x:               number
+  y:               number
+  width:           number
+  height:          number
+  image:           string | null // base64 data URL; required for "website",
+                                 // optional/settable for all other types
+  archived:        boolean
+  attachedNoteIds: [id]
+
+Type-specific additional fields:
+
+  type          Additional fields
+  ──────────    ──────────────────────────────────────────────────────────────
+  subcontext    context: Context
+  website       url: string
+  application   bundlePath: string, appName: string
+  file          path: string, defaultApp: string
+  line          start: Endpoint, end: Endpoint
+  ellipse       center: Endpoint, containedIds: [id]
+
+Positional field usage:
+  subcontext, website, application, file — x, y, width, height used normally.
+  line   — position is fully derived from resolved endpoints. Store x, y,
+            width, height as 0; never read them for positioning.
+  ellipse— position is derived from center. width/height define dimensions.
+            Store x, y as 0; never read them for positioning.
+
+Endpoint
+────────
+Used by line.start, line.end, and ellipse.center.
+
+  { type: "canvas",   x: number, y: number }
+    or
+  { type: "anchored", objectId: id }
+
+An "anchored" endpoint resolves to the centre of the referenced object's
+bounding box at render time and follows it when moved.
+
+Endpoint revert rules (canonical — all other sections refer here):
+  Anchored target deleted:  Endpoint reverts to { type:"canvas", x, y } at
+                            the last known absolute position of the anchor.
+  Anchored target archived: Endpoint remains stored as "anchored". Any line
+                            or ellipse whose endpoint references an archived
+                            object is hidden while that object is archived;
+                            it reappears when the object is un-archived.
+
+Note
+────
+  id:      string
+  format:  "plaintext" | "html"
+  content: string    // plain text or HTML string
+  css:     string    // non-empty only when format is "html"
+  anchor:  NoteAnchor
+  x:       number    // pixel offset from the anchor point
+  y:       number    // pixel offset from the anchor point
+  width:   number
+  height:  number
+
+NoteAnchor
+  { type: "frame" }
+    or
+  { type: "object", objectId: id,
+    corner: "top-left"|"top-right"|"bottom-left"|"bottom-right" }
+
+  "frame" — anchor point is canvas origin (0,0) of the note's parent context.
+            x, y are absolute canvas coordinates. Default for new notes.
+  "object"— anchor point is the specified corner of the referenced object's
+            current bounding box. x, y are pixel offsets from that corner.
+            The note moves with the object.
+
+Note anchor revert rules (same pattern as Endpoint revert rules):
+  Anchored object deleted:  Note's anchor reverts to { type:"frame" } at the
+                            note's last known absolute canvas position.
+  Anchored object archived: Note remains stored as anchored but is hidden
+                            while the object is archived; reappears at the
+                            same relative offset when the object is un-archived.
+
+[Rule] Notes are not independently archivable. Their visibility is controlled
+entirely by their anchor state and their parent context's visibility.
+
+NoteTemplate
+────────────
+  id:      string
+  name:    string
+  format:  "plaintext" | "html"
+  content: string
+  css:     string
+
+
+════════════════════════════════════════════════════════════════════════════════
+2. APPLICATION SHELL
+════════════════════════════════════════════════════════════════════════════════
+
+Window Layout
+─────────────
+Three fixed regions, top to bottom:
+  1. Tab Bar
+  2. Navigation Bar
+  3. Canvas Area (remainder)
+
+A collapsible palette panel overlays or docks to one side of the canvas area.
+
+Archive / Delete Constraint
+───────────────────────────
+[Rule — canonical location] A context or sub-context cannot be archived or
+deleted unless every direct child object is already archived or deleted.
+
+[Clarification] The constraint is shallow — it applies only to direct
+children, not the full subtree. A direct child that is an archived sub-context
+satisfies the constraint for its parent regardless of what is inside it.
+
+On violation: show an explanatory message identifying the blocking children.
+Delete always requires a confirmation dialog.
+Archive always requires a confirmation dialog.
+
+Tab Bar
+───────
+  • One tab per top-level context.
+  • + button at the right end creates a new context (prompts for name).
+  • Per tab:
+      – Double-click label to rename inline.
+      – Right-click → context menu with: Rename, Archive, Delete.
+      – Drag to reorder (order persisted as the order of contexts[] in JSON).
+
+  [Gotcha — Rename via context menu] Do NOT use startInlineRename() from the
+  context menu. The context menu fires on mousedown; the subsequent mouseup
+  lands on the -webkit-app-region: drag area, which steals focus immediately.
+  The blur then commits the unchanged value, appearing to do nothing. Instead,
+  use showPrompt() (a modal dialog):
+
+    {
+      label: 'Rename',
+      action: async () => {
+        const newName = await showPrompt('Rename context', ctx.name);
+        if (newName && newName.trim()) store.renameContext(ctx.id, newName.trim());
+      },
+    }
+
+  [Gotcha — Window dragging] Make .tab-bar-tabs use -webkit-app-region: drag
+  so the whole tab bar area is draggable, but add -webkit-app-region: no-drag
+  to individual .tab elements so they remain clickable:
+
+    .tab-bar-tabs { -webkit-app-region: drag; }
+    .tab          { -webkit-app-region: no-drag; }
+
+Navigation Bar
+──────────────
+  • Back button — disabled when viewing a top-level context.
+  • Breadcrumb trail — context names separated by ›.
+      At top level: shows only the current context name (not clickable).
+      Inside a sub-context: full path; each ancestor is a clickable link.
+
+Navigation Behaviour
+  • Clicking a sub-context object navigates into it.
+  • Back navigates to the immediate parent.
+  • The active tab always reflects the top-level context.
+
+Native Dialogs
+──────────────
+[Gotcha] window.alert(), window.confirm(), and window.prompt() all return
+null/undefined in Electron's renderer process — native dialogs are disabled.
+Implement all dialogs as in-app modals. The dialogs.js module must export:
+
+  showAlert(title, message)    → Promise<void>
+  showConfirm(title, message)  → Promise<boolean>
+  showPrompt(title, placeholder) → Promise<string|null>
+
+Each renders a .dialog-box inside a #dialog-overlay element, with Cancel and
+OK/Create buttons, Enter to confirm, Escape to cancel.
+
+
+════════════════════════════════════════════════════════════════════════════════
+3. CANVAS
+════════════════════════════════════════════════════════════════════════════════
+
+Each context and sub-context has its own independent canvas.
+
+Viewport
+  • Pan by dragging empty canvas space.
+  • Zoom by scroll wheel or pinch gesture.
+  • scale, offsetX, offsetY are persisted in canvas.viewport.
+
+Objects on Canvas
+  • All objects are draggable to any position.
+  • All objects are resizable by dragging edges or corners (8 handles: N, S, E,
+    W, NE, NW, SE, SW).
+  [Clarification] No enforced minimum size, but clamp to 1px minimum.
+
+Fit to Screen
+  A "Fit to screen" button in the canvas toolbar adjusts canvas.viewport so
+  all objects are visible with a small margin. Object positions are unchanged.
+  [Clarification] No-op if the canvas has no objects.
+
+Object Context Menu
+  Right-clicking any object opens a menu with:
+    Edit properties
+    Add / view attached notes
+    Archive (confirmation required)
+    Delete (confirmation required)
+    Type-specific actions (specified per type in Section 4)
+
+Drag-then-Click Bug Prevention
+  [Gotcha] After dragging a canvas object, releasing the mouse triggers the
+  click handler, opening the URL / launching the app / etc. e.movementX/Y on
+  the click event is near-zero even after a long drag, so it cannot be used
+  to distinguish drag from click.
+
+  Fix: use a module-level boolean flag:
+
+    let dragMoved = false;
+
+  In startObjectDrag's onMove callback, set it when cumulative delta > 2px:
+    if (Math.abs(dx) > 2 || Math.abs(dy) > 2) dragMoved = true;
+
+  In each object's click handler, check and clear the flag:
+    el.addEventListener('click', () => {
+      if (dragMoved) { dragMoved = false; return; }
+      handleObjectClick(obj, ctx);
+    });
+
+Hover Tooltips
+  [Gotcha] CSS ::after pseudo-element tooltips will not work here. Every
+  button sits inside a container with overflow: hidden (tab bar, nav bar,
+  canvas viewport), which clips pseudo-elements. Use a single floating <div>
+  appended directly to <body> with position: fixed.
+
+  In renderer/styles/app.css:
+    #app-tooltip {
+      position: fixed;
+      background: #111;
+      color: #e0e0e0;
+      font-size: 11px;
+      white-space: nowrap;
+      padding: 4px 8px;
+      border-radius: 4px;
+      pointer-events: none;
+      z-index: 99999;
+      opacity: 0;
+      transition: opacity 0.12s;
+    }
+
+  In renderer/tooltip.js (imported as side-effect in app.js):
+    const el = document.createElement('div');
+    el.id = 'app-tooltip';
+    document.body.appendChild(el);
+    let showTimer = null;
+    function show(text, rect) { /* position and fade in */ }
+    function hide() { clearTimeout(showTimer); el.style.opacity = '0'; }
+    document.addEventListener('mouseover', e => {
+      const t = e.target.closest('[data-tooltip]');
+      if (!t) return;
+      clearTimeout(showTimer);
+      showTimer = setTimeout(() => show(t.dataset.tooltip,
+        t.getBoundingClientRect()), 400);
+    });
+    document.addEventListener('mouseout', e => {
+      const t = e.target.closest('[data-tooltip]');
+      if (t && !t.contains(e.relatedTarget)) hide();
+    });
+    document.addEventListener('mousedown', hide);
+    document.addEventListener('scroll', hide, true);
+
+  Add data-tooltip="…" attributes to every button:
+    tab-bar.js      archive btn:     "View archived items"
+    tab-bar.js      add btn:         "New context"
+    app.js          settings btn:    "Settings"
+    nav-bar.js      back btn:        "Back"
+    canvas-view.js  fit btn:         "Fit to screen"
+    canvas-view.js  note delete btn: "Delete note"
+    canvas-view.js  note edit btn:   "Edit HTML/CSS"
+    canvas-view.js  note tmpl btn:   "Save as template"
+    settings.js     close btn:       "Close"
+    archive-view.js close btn:       "Close"
+    archive-view.js unarchive ctx:   "Restore this context to the tab bar"
+    archive-view.js bulk unarchive:  "Restore all archived items in this context"
+    archive-view.js item unarchive:  "Restore this item to the canvas"
+
+
+════════════════════════════════════════════════════════════════════════════════
+4. OBJECT TYPES
+════════════════════════════════════════════════════════════════════════════════
+
+Implement in order: Website → Application → File/Folder → Sub-Context →
+Line → Ellipse.
+
+Object Label Position
+─────────────────────
+The label is always displayed ABOVE the image/icon, not below. In
+buildObjectContent(), create and append the label div FIRST, then the image
+or icon. The container is flex-direction: column so DOM order controls
+visual order.
+
+In objects.css: .canvas-object-label { font-size: 12px; ... }
+Image border-radius should be rounded on the BOTTOM (label is above):
+  .canvas-object-image { border-radius: 0 0 var(--radius-md) var(--radius-md); }
+
+──────────────────────────────────────────────────────────────────────────────
+Website
+──────────────────────────────────────────────────────────────────────────────
+Data:     url: string, label, image (required — base64 screenshot)
+Visual:   image fills the object frame; label above.
+Behaviour:
+  Single click: open url in the default browser.
+  Right-click: standard context menu; no type-specific actions.
+Creation: Dialog with URL and label fields. Screenshot captured automatically
+          or pasted by the user; stored as image. Screenshot is required
+          before the dialog can be submitted.
+
+──────────────────────────────────────────────────────────────────────────────
+Application
+──────────────────────────────────────────────────────────────────────────────
+Data:     bundlePath, appName, label, image (optional — falls back to system
+          app icon fetched via app.getFileIcon())
+Visual:   image if set; otherwise the system-resolved application icon.
+          Label above.
+Behaviour:
+  Single click: launch the application at bundlePath via shell.openPath().
+  Right-click: standard context menu; no type-specific actions.
+Creation: Dialog with searchable list of installed macOS applications.
+          Selecting one auto-populates bundlePath, appName, label.
+          Optional "Custom Image" section using the image picker (see below).
+
+App list loading:
+  IPC handler in main.js uses mdfind to find all .app bundles:
+    exec("mdfind \"kMDItemKind == 'Application'\" 2>/dev/null", ...)
+  [Gotcha] Do NOT pipe through `| head -N` — this truncates results before
+  the .app filter is applied, causing many apps to be missing.
+  [Gotcha] Do NOT call .slice(0, N) on the filtered array before rendering
+  rows — this hides apps alphabetically beyond the Nth entry.
+  Sort results by appName before returning.
+
+Edit Properties: shows Bundle Path, App Name, label, and image picker
+pre-populated with current values.
+
+──────────────────────────────────────────────────────────────────────────────
+File / Folder
+──────────────────────────────────────────────────────────────────────────────
+Data:     path, defaultApp (bundle path of the app to open with), label,
+          image (optional)
+Visual:   Renders with a folder icon shape — see CSS below. Icon of defaultApp
+          (or image if set); filename as label.
+Behaviour:
+  Single click: open path using the specified app.
+  Right-click: standard context menu; no type-specific actions.
+Creation: Native file picker first (window.api.file.pick()), then a dialog
+          showing the path, a label input, an "Open With" app picker, and
+          an optional image picker.
+
+Folder shape CSS (objects.css):
+  .canvas-object-file {
+    padding: 8px;
+    gap: 6px;
+    overflow: visible;   /* REQUIRED so ::before tab clears parent overflow */
+    border-style: solid;
+    border-color: #4a8fb5;
+    border-radius: 0 var(--radius-md) var(--radius-md) var(--radius-md);
+    background: #192c3a;
+  }
+  .canvas-object-file::before {
+    content: '';
+    position: absolute;
+    top: -13px;
+    left: -1px;
+    width: min(48%, 88px);
+    height: 14px;
+    background: #192c3a;
+    border: 1px solid #4a8fb5;
+    border-bottom: none;
+    border-radius: var(--radius-sm) var(--radius-sm) 0 0;
+  }
+
+Opening files with a specific app:
+  [Gotcha] shell.openPath() ignores any app argument — it always uses the
+  system default. To open with a specific app, use exec() with `open -a`:
+
+    ipcMain.handle('file:open', (_e, filePath, appPath) => {
+      if (appPath && appPath !== '/usr/bin/open') {
+        return new Promise(resolve =>
+          exec(`open -a ${JSON.stringify(appPath)} ${JSON.stringify(filePath)}`,
+               err => resolve(!err))
+        );
+      }
+      return shell.openPath(filePath);
+    });
+
+Edit Properties: shows path, "Open With" app picker pre-selected to current
+defaultApp, label, and image picker.
+
+──────────────────────────────────────────────────────────────────────────────
+Sub-Context
+──────────────────────────────────────────────────────────────────────────────
+Data:     A full nested Context object (its own canvas, objects, notes).
+          image: optional.
+Visual:
+  If image is set: display the image with label above (same as other types).
+  If image is not set: display a labeled dashed rectangular frame.
+  Internal canvas contents are never rendered in the parent view.
+Behaviour:
+  Single click: navigate into this sub-context.
+  Right-click: standard context menu. Archive and Delete enforce the
+               Archive/Delete Constraint.
+Creation: Dialog (dialog-wide) with Name field and optional image picker.
+          Creates a new empty Context with default viewport
+          { scale:1, offsetX:40, offsetY:40 }.
+
+Drag Object Into Sub-Context (drop transfer):
+  Dragging any non-line, non-ellipse canvas object and dropping it onto a
+  sub-context tile removes the object from the current context and adds it as
+  a child of the sub-context. The object is placed at the centre of the
+  sub-context's stored viewport.
+
+  store.js — add transferObject(fromContextId, objectId, toSubContextObjId,
+  newX, newY):
+    1. Guards: both IDs exist; target is a subcontext; object ≠ target.
+    2. Call _revertReferences(fromCtx, objectId) to fix dangling endpoints.
+    3. Remove object from fromCtx.canvas.objects.
+    4. Remove objectId from any ellipse.containedIds in fromCtx.
+    5. Clone object with { x: newX, y: newY }.
+    6. For line type: revert any 'anchored' endpoints to canvas coords.
+    7. For ellipse type: revert anchored center; clear containedIds.
+    8. Push clone into subCtxObj.context.canvas.objects.
+    9. _persist() and _notify().
+
+  canvas-view.js — inside startObjectDrag():
+    - Add dropTargetId (null or hovered sub-context id).
+    - clearDropTarget(): removes 'canvas-object-drop-target' CSS class.
+    - updateDropTarget(e2): convert mouse to world coords:
+        const vpRect = vpEl.getBoundingClientRect();
+        const worldX = (e2.clientX - vpRect.left - currentVp.offsetX) / currentVp.scale;
+        const worldY = (e2.clientY - vpRect.top  - currentVp.offsetY) / currentVp.scale;
+      Then check each non-archived subcontext bounding box.
+    - Call updateDropTarget(e2) at end of onMove.
+    - In onUp:
+        [Gotcha] Capture dropTargetId BEFORE calling clearDropTarget(), which
+        sets it to null:
+          const finalDropTarget = dropTargetId;
+          clearDropTarget();
+        Then check finalDropTarget (not dropTargetId).
+      Placement at sub-context viewport centre:
+        const newX = Math.max(0, (vpRect.width  / 2 - subVp.offsetX) / subVp.scale);
+        const newY = Math.max(0, (vpRect.height / 2 - subVp.offsetY) / subVp.scale);
+
+  objects.css — drop-target highlight:
+    .canvas-object-drop-target {
+      outline: 2px solid var(--color-accent) !important;
+      outline-offset: 2px;
+      box-shadow: 0 0 20px rgba(91, 156, 246, 0.35) !important;
+    }
+
+Edit Properties: shows label and image picker pre-populated with current image.
+
+──────────────────────────────────────────────────────────────────────────────
+Line
+──────────────────────────────────────────────────────────────────────────────
+Data:     start: Endpoint, end: Endpoint
+Visual:   Straight line between the two resolved endpoint positions.
+          Hidden if either endpoint's anchored target is archived.
+Behaviour:
+  Single click or right-click → Edit: enter edit mode.
+  Edit mode:
+    Drag either endpoint to a new canvas position.
+    Drag an endpoint onto an object to anchor it (snaps to object centre).
+    Drag an anchored endpoint off its object to detach at drag-release as
+    canvas coordinates.
+    Click elsewhere or press Escape to exit edit mode.
+  [Clarification] Both endpoints anchored to the same object is valid —
+  renders as a zero-length point and follows that object.
+Creation: Drag from palette → place default endpoints at drop position →
+          immediately enter edit mode.
+
+──────────────────────────────────────────────────────────────────────────────
+Ellipse
+──────────────────────────────────────────────────────────────────────────────
+Data:     center: Endpoint, width, height, containedIds: [id]
+Visual:   Ellipse outline at resolved center. Hidden if center's anchored
+          target is archived.
+Behaviour:
+  Single click or right-click → Edit: enter edit mode.
+  Moving: dragging moves every object in containedIds by the same delta
+          simultaneously. Applies at all times, not only in edit mode.
+  Edit mode:
+    Drag center to reposition (same anchor/detach behaviour as Line).
+    Drag N/S/E/W edge handles to reshape (updates width and height).
+    Objects whose entire bounding box falls within the ellipse are highlighted.
+    On exit, containedIds is replaced with the current highlighted set.
+  [Clarification] Archived objects in containedIds retain membership. Their
+  stored positions are updated when the ellipse moves.
+  [Clarification] An ellipse cannot be a member of its own containedIds.
+  Nested ellipse chaining is resolved transitively at move-delta application,
+  not stored as nested structure.
+Creation: Drag from palette → place at drop position with default dimensions
+          → immediately enter edit mode.
+
+
+════════════════════════════════════════════════════════════════════════════════
+5. REUSABLE DIALOG HELPERS IN dialogs.js
+════════════════════════════════════════════════════════════════════════════════
+
+In addition to the core showAlert/showConfirm/showPrompt, implement these
+reusable builder functions (not exported — used internally by dialogs):
+
+buildAppPicker(preSelectedBundlePath = null)
+────────────────────────────────────────────
+Returns { el, getSelectedApp() }.
+
+el is a column flex container containing:
+  1. A display div (styled like dialog-input, full width) showing the
+     currently selected app name or "None — system default". Clicking it
+     toggles the search panel open/closed. Hovering highlights the border
+     in the accent colour. A ▾/▴ chevron indicates state.
+  2. A collapsible panel (display:flex / display:none) containing:
+       – A search input (class="dialog-input", placeholder "Search applications…")
+       – A .dialog-app-list div (min-height:120px, max-height:200px, overflow-y:auto)
+
+Behaviour:
+  - If preSelectedBundlePath is provided: panel starts collapsed, display
+    shows the matched app name; loaded asynchronously after apps list arrives.
+  - If no preSelection: panel starts expanded, search input is auto-focused.
+  - Selecting an app: updates display text, clears search, collapses panel,
+    re-renders list with new selection highlighted.
+  - Apps loaded via window.api.apps.list() (async).
+
+[Gotcha] The container div must have display:flex; flex-direction:column so
+the dialog-app-list's flex:1 takes effect. Without this the list collapses.
+
+buildImagePicker(currentImage = null)
+──────────────────────────────────────
+Returns { el, getImage() }.
+
+el is a column flex container (gap:6px) containing:
+  1. A preview div (height:80px, border, border-radius) showing an <img> of
+     currentImage, or a "No image" placeholder span.
+  2. A button row with:
+       – "Choose Image…" button: calls window.api.file.pickImage() (returns
+         a base64 data URL); updates imageData and re-renders preview.
+       – "Clear" button: sets imageData to null, re-renders preview.
+
+getImage() returns the current imageData (base64 data URL or null).
+
+IPC required:
+  main.js:
+    ipcMain.handle('dialog:openImage', async () => {
+      const r = await dialog.showOpenDialog(mainWindow, {
+        properties: ['openFile'],
+        filters: [{ name: 'Images',
+                    extensions: ['png','jpg','jpeg','gif','webp','svg'] }],
+      });
+      if (r.canceled || !r.filePaths[0]) return null;
+      const data = await fs.promises.readFile(r.filePaths[0]);
+      const ext  = path.extname(r.filePaths[0]).slice(1).toLowerCase();
+      const mime = ext === 'svg' ? 'image/svg+xml'
+                 : `image/${ext === 'jpg' ? 'jpeg' : ext}`;
+      return `data:${mime};base64,${data.toString('base64')}`;
+    });
+
+  preload.js:
+    file: {
+      ...
+      pickImage: () => ipcRenderer.invoke('dialog:openImage'),
+    }
+
+Where image pickers are used:
+  showApplicationDialog    — "Custom Image (optional)" below the app list
+  showFileDialog           — "Custom Image (optional)" below the app picker
+  showSubContextDialog     — "Custom Image (optional)" above action row
+  showObjectPropertiesDialog — for application, file, subcontext types;
+                               pre-populated with obj.image
+
+
+════════════════════════════════════════════════════════════════════════════════
+6. NOTES
+════════════════════════════════════════════════════════════════════════════════
+
+Notes are always-visible overlays on the canvas — never tooltips. A note's
+position is an offset from its NoteAnchor.
+
+Plain Text Notes
+  Editable inline by clicking. No formatting controls.
+
+HTML + CSS Notes
+  Stores an HTML string and a CSS string.
+  Rendered in place on the canvas as a styled block, sandboxed (iframe or
+  shadow DOM) to prevent style leakage.
+  HTML and CSS are editable via a modal editor opened from the note.
+
+Note Dragging
+  [Gotcha] Attaching mousedown to the whole note element for drag does NOT
+  work when the note body is a contentEditable div. Two compounding causes:
+    1. The browser starts a text-selection drag, competing with element-move.
+    2. blur on the contentEditable calls store.updateNote, which triggers a
+       re-render and resets the note's visual position mid-drag.
+
+  Fix: a dedicated drag handle element, visually separate from the text area.
+  In attachNoteEvents(), add:
+    const dragHandle = document.createElement('div');
+    dragHandle.className = 'canvas-note-drag-handle';
+    el.appendChild(dragHandle);
+    dragHandle.addEventListener('mousedown', (e) => {
+      if (e.button !== 0) return;
+      e.stopPropagation();
+      startNoteDrag(e, note);
+    });
+
+  CSS for the handle (notes.css):
+    .canvas-note-drag-handle {
+      width: 100%;
+      height: 8px;
+      cursor: grab;
+      flex-shrink: 0;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .canvas-note-drag-handle::after {
+      content: '';
+      width: 24px;
+      height: 3px;
+      border-radius: 2px;
+      background: rgba(255,255,255,0.15);
+      opacity: 0;
+      transition: opacity 0.15s;
+    }
+    .canvas-note:hover .canvas-note-drag-handle::after { opacity: 1; }
+    .canvas-note-drag-handle:active { cursor: grabbing; }
+
+Templates (NoteTemplate)
+  Either format can be saved with a name via "Save as template".
+  Templates appear in the palette's Notes sub-section.
+  Dragging a template onto the canvas creates a new independent note instance.
+  Templates are global across all contexts.
+
+
+════════════════════════════════════════════════════════════════════════════════
+7. PALETTE
+════════════════════════════════════════════════════════════════════════════════
+
+A collapsible panel, always accessible from the canvas. Scrollable.
+
+Object entries (always present, one per type):
+  Sub-Context · Website · Application · File/Folder · Line · Ellipse
+
+Notes sub-section (always present):
+  Plain text note
+  HTML + CSS note
+  One entry per saved NoteTemplate
+
+Creation flow: drag from palette → drop onto canvas → open creation dialog
+for that type → if cancelled, no object or state change.
+
+
+════════════════════════════════════════════════════════════════════════════════
+8. ARCHIVE SYSTEM
+════════════════════════════════════════════════════════════════════════════════
+
+Archiving
+  Any canvas object: right-click → Archive (with confirmation).
+  Any top-level context: right-click on its tab → Archive (with confirmation).
+  Archived items are hidden from all canvas views.
+
+Archive View
+  Accessible via a dedicated toolbar button (archive icon).
+  Shows all archived items within their original context/sub-context hierarchy.
+  Parent contexts appear as structural containers even if not themselves archived.
+  Each archived item has an Un-archive action.
+  Each sub-context node has a bulk "Un-archive all immediate children" action.
+  [Clarification] Un-archiving a context individually does not auto-un-archive
+  its children — only the bulk action does, and it applies one level deep only.
+
+  [Gotcha] The archive overlay must call store._notify() after revealing itself
+  so the render loop fires and fills in the content (including the close button):
+    export function showArchiveOverlay() {
+      const el = document.getElementById('archive-overlay');
+      el.classList.remove('hidden');
+      store._notify();
+    }
+
+
+════════════════════════════════════════════════════════════════════════════════
+9. CHROME EXTENSION (Phase 2)
+════════════════════════════════════════════════════════════════════════════════
+
+Build only after Phase 1 is complete and stable. Distributed independently.
+
+Electron Side — Local HTTP Server
+  The Electron app runs a local HTTP server for its entire lifetime.
+  Default port: 27182 (configurable in app settings UI).
+  If the port is unavailable at startup, surface a clear error in settings.
+  The app continues to run normally without the HTTP server.
+
+  GET /destinations
+    Returns all contexts and sub-contexts:
+      [{ "id": "...", "displayPath": "Work › Project A" }]
+
+  POST /add
+    Accepts: { url, label, destinationId, screenshot: "<base64>" }
+    Creates a new website object in the specified context at the centre of
+    that context's stored viewport. If the user is viewing that canvas,
+    the view updates immediately.
+
+  CORS: every response must include:
+    Access-Control-Allow-Origin: *
+    Access-Control-Allow-Private-Network: true
+      (only when the request includes Access-Control-Request-Private-Network
+       header — Chrome 104+ PNA spec)
+
+  After writing a new object, the main process sends IPC 'state-updated-
+  externally' to the renderer. The renderer wires:
+    window.api.onExternalUpdate(() => store.reload());
+  store.reload() re-reads state.json from disk and calls _notify().
+
+Extension Files
+  extension/manifest.json
+    Manifest V3. Permissions: activeTab, scripting, storage, tabs.
+    host_permissions must include "http://127.0.0.1/*" and "http://localhost/*".
+
+  extension/background.js
+    Service worker. Handles capture-screenshot message by calling
+    chrome.tabs.captureVisibleTab.
+
+  extension/popup.html + popup.js
+    Fetches GET /destinations from the local server. Shows label input
+    (pre-filled with page title) and searchable/scrollable context list.
+    On confirm: POSTs to /add. On success: confirmation message; close popup
+    after short delay. On failure: clear error message with hint.
+
+  extension/options.html + options.js
+    Port number setting. Default 27182. Makes required match with app explicit.
+
+  [Gotcha] Use AbortController + setTimeout for fetch timeouts:
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 5000);
+    const res   = await fetch(url, { signal: controller.signal });
+    clearTimeout(timer);
+  Do NOT use AbortSignal.timeout() — not available in older Chrome builds.
+
+
+════════════════════════════════════════════════════════════════════════════════
+10. IPC SURFACE (main.js ↔ preload.js ↔ renderer)
+════════════════════════════════════════════════════════════════════════════════
+
+preload.js exposes window.api with:
+
+  state:
+    load()              → invoke('state:load')
+    save(state)         → invoke('state:save', state)
+
+  settings:
+    load()              → invoke('settings:load')
+    save(updates)       → invoke('settings:save', updates)
+    status()            → invoke('settings:status')
+    onStatus(fn)        → on('server-status', fn)
+
+  onExternalUpdate(fn)  → on('state-updated-externally', fn)
+
+  apps:
+    list()              → invoke('apps:list')
+      main.js: exec("mdfind \"kMDItemKind == 'Application'\" 2>/dev/null")
+               filters .app paths, maps to { bundlePath, appName }, sorts.
+               [Gotcha] No `| head -N` pipe and no slice limit.
+
+  file:
+    icon(p)             → invoke('file:icon', p)
+      main.js: app.getFileIcon(p, { size:'large' }).toDataURL()
+    open(p, appPath)    → invoke('file:open', p, appPath)
+      main.js: if appPath provided, exec(`open -a <app> <file>`);
+               else shell.openPath(p)
+    pick()              → invoke('dialog:openFile')
+      main.js: dialog.showOpenDialog({ properties:['openFile','openDirectory'] })
+    pickImage()         → invoke('dialog:openImage')
+      main.js: dialog filtered to image extensions; returns base64 data URL
+
+  app:
+    launch(bundlePath)  → invoke('app:launch', bundlePath)
+      main.js: shell.openPath(bundlePath)
+
+  url:
+    open(u)             → invoke('url:open', u)
+      main.js: shell.openExternal(u)
+
+  web:
+    screenshot(url)     → invoke('web:screenshot', url)
+      main.js: headless BrowserWindow, 15s timeout, returns PNG data URL
+
+
+════════════════════════════════════════════════════════════════════════════════
+11. PROJECT STRUCTURE
+════════════════════════════════════════════════════════════════════════════════
+
+  /
+  ├── main.js                    Electron main process; all IPC handlers;
+  │                              HTTP server; state I/O
+  ├── preload.js                 contextBridge API surface
+  ├── package.json               includes electron-builder config
+  ├── .gitignore                 node_modules/, dist/, .DS_Store, editor dirs
+  │
+  ├── renderer/
+  │   ├── index.html
+  │   ├── app.js                 Entry point; imports tooltip.js; mounts
+  │   │                          tab-bar, nav-bar, canvas-view, settings
+  │   ├── store.js               Reactive state store; _persist()/_notify()
+  │   ├── tooltip.js             Floating tooltip singleton
+  │   │
+  │   ├── components/
+  │   │   ├── tab-bar.js
+  │   │   ├── nav-bar.js
+  │   │   ├── canvas-view.js     buildObjectContent, attachObjectEvents,
+  │   │   │                      startObjectDrag, startNoteDrag, ellipse/line
+  │   │   │                      edit modes, drag-to-subcontext transfer
+  │   │   ├── dialogs.js         All modal dialogs + buildAppPicker +
+  │   │   │                      buildImagePicker helpers
+  │   │   ├── settings.js
+  │   │   └── archive-view.js
+  │   │
+  │   └── styles/
+  │       ├── app.css            Global styles; #app-tooltip
+  │       ├── tabs.css           Tab bar; -webkit-app-region rules
+  │       ├── canvas.css         Canvas viewport and palette
+  │       ├── objects.css        .canvas-object-* styles; folder shape;
+  │       │                      resize handles; drop-target highlight
+  │       ├── notes.css          .canvas-note-* styles; drag handle
+  │       └── dialogs.css        Dialog overlay, box, inputs, app list
+  │
+  └── extension/
+      ├── manifest.json
+      ├── background.js
+      ├── popup.html + popup.js
+      └── options.html + options.js
+
+
+════════════════════════════════════════════════════════════════════════════════
+12. BUILDING AND INSTALLING
+════════════════════════════════════════════════════════════════════════════════
+
+package.json (relevant fields):
+  "author": "Your Name",
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder --mac dmg"
+  },
+  "build": {
+    "appId": "com.yourname.contextswitch",
+    "productName": "ContextSwitch",
+    "mac": { "category": "public.app-category.productivity" },
+    "dmg": { "title": "ContextSwitch" }
+  }
+
+Build command (skip code signing for development):
+  CSC_IDENTITY_AUTO_DISCOVERY=false npm run build
+
+The .app bundle lands in dist/mac-arm64/ContextSwitch.app.
+
+Install to /Applications (always delete first, never cp -r onto existing):
+  rm -rf /Applications/ContextSwitch.app
+  cp -r dist/mac-arm64/ContextSwitch.app /Applications/ContextSwitch.app
+
+[Gotcha] Running `cp -r src.app /Applications/ContextSwitch.app` when the
+destination already exists creates a NESTED .app inside the old bundle rather
+than replacing it. Always `rm -rf` the destination first.
+
+The app code is packed into an .asar archive inside the bundle. To verify a
+build contains your latest changes:
+  npx asar extract /Applications/ContextSwitch.app/Contents/Resources/app.asar \
+    /tmp/cs-check
+  # inspect files in /tmp/cs-check
+  rm -rf /tmp/cs-check
